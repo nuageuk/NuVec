@@ -1,0 +1,15 @@
+# Build directories
+build/
+bin/
+obj/
+out/
+
+# ROMs
+roms/
+
+# IDE / editor files
+.vs/
+.vscode/
+*.user
+.idea/
+CMakeUserPresets.json
