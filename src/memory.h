@@ -21,4 +21,9 @@
 #define BIOS_ROM_START   0xE000
 #define BIOS_ROM_END     0xFFFF
 
+#include <stdint.h>
+
+extern uint8_t ram[RAM_END - RAM_START + 1];
+extern uint8_t bios_rom[BIOS_ROM_END - BIOS_ROM_START + 1];
+
 #endif // MEMORY_H
