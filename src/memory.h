@@ -29,4 +29,11 @@ extern uint8_t bios_rom[BIOS_ROM_END - BIOS_ROM_START + 1];
 uint8_t mem_read8(uint16_t address);
 void mem_write8(uint16_t address, uint8_t value);
 
+#define CART_ROM_SIZE (CART_ROM_END - CART_ROM_START + 1)
+
+extern uint8_t cart_rom[CART_ROM_SIZE];
+
+int mem_load_rom(const char* filepath);
+
+
 #endif // MEMORY_H

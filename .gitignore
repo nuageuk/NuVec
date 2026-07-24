@@ -6,6 +6,7 @@ out/
 
 # ROMs
 roms/
+Vectrex BIOS (1982).vec
 
 # IDE / editor files
 .vs/
