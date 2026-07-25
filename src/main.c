@@ -1,8 +1,13 @@
 #include <stdio.h>
 #include "memory.h"
 #include "cpu.h"
+#include "display.h"
+#include <SDL.h>
 
-int main(void) {
+int main(int argc, char *argv[]) {
+    (void)argc;
+    (void)argv;
+
     printf("NuVec starting\n");
     printf("BIOS ROM starts at 0x%04X\n", BIOS_ROM_START);
 
@@ -110,6 +115,33 @@ int main(void) {
                cpu.PC, cpu.A, cpu.S, RAM_START + 24, initial_s);
     }
     cpu_print_state(&cpu);
+
+    // Rendering pipeline smoke test: hardcoded shape, not wired to the CPU/memory yet.
+    if (!display_init()) {
+        fprintf(stderr, "Failed to initialize display\n");
+        return 1;
+    }
+
+    int running = 1;
+    while (running) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT) {
+                running = 0;
+            }
+        }
+
+        display_clear();
+
+        // Triangle centered in the 600x400 window
+        display_draw_line(300, 120, 200, 300);
+        display_draw_line(200, 300, 400, 300);
+        display_draw_line(400, 300, 300, 120);
+
+        display_present();
+    }
+
+    display_shutdown();
 
     return 0;
 }
