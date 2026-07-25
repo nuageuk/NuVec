@@ -1,4 +1,5 @@
 #include "cpu.h"
+#include "display.h"
 #include "memory.h"
 #include <inttypes.h>
 #include <stdio.h>
@@ -228,6 +229,75 @@ static uint16_t cpu_pop16(Cpu *cpu) {
     return ((uint16_t)hi << 8) | lo;
 }
 
+// Draw_VL: X points at a vector list -- a count-minus-1 byte followed by
+// that many (dy, dx) signed-byte pairs, each a delta from the current pen
+// position (not an absolute coordinate). Walks the list and draws each
+// segment via the existing display_draw_line(). Intensity/scale/mode-byte
+// nuances aren't modeled yet, and the pen always starts at (0,0) -- real
+// Vectrex coordinate centering/scaling is future work, same as the display
+// list renderer from the previous step.
+static void hle_draw_vl(Cpu *cpu) {
+    uint16_t addr = cpu->X;
+    uint8_t count = mem_read8(addr);
+    addr++;
+
+    int pen_x = 0, pen_y = 0;
+    for (uint16_t i = 0; i <= count; i++) {
+        int8_t dy = (int8_t)mem_read8(addr);
+        int8_t dx = (int8_t)mem_read8(addr + 1);
+        addr += 2;
+
+        int new_x = pen_x + dx;
+        int new_y = pen_y + dy;
+        display_draw_line(pen_x, pen_y, new_x, new_y);
+        pen_x = new_x;
+        pen_y = new_y;
+    }
+}
+
+// Wait_Recal: real hardware waits for the beam recalibration/frame timing
+// window. Not modeled yet -- structured as its own handler so it's a single
+// place to add real frame-timing behavior later, but for now it's a no-op.
+static void hle_wait_recal(Cpu *cpu) {
+    (void)cpu;
+}
+
+// Lets debug/diagnostic code (see main.c's BIOS tracer) temporarily disable
+// HLE interception so real ROM bytes execute through the CPU core even at
+// an address that's normally hooked -- e.g. to inspect what $F192 actually
+// does before trusting it's really Wait_Recal. Defaults on.
+static int hle_enabled = 1;
+
+void cpu_set_hle_enabled(int enabled) {
+    hle_enabled = enabled;
+}
+
+// Checked at the very top of cpu_step(), before any opcode fetch: if PC is
+// sitting on a known BIOS routine's entry address, run the native handler
+// instead of whatever 6809 bytes are actually there, then pop the return
+// address off the stack straight into PC -- the same mechanic as the RTS
+// opcode -- rather than letting the real (or, for BIOS regions we haven't
+// loaded meaningfully, garbage) bytes at that address execute.
+static int cpu_try_hle(Cpu *cpu) {
+    if (!hle_enabled) {
+        return 0;
+    }
+
+    switch (cpu->PC) {
+        case HLE_DRAW_VL:
+            hle_draw_vl(cpu);
+            break;
+        case HLE_WAIT_RECAL:
+            hle_wait_recal(cpu);
+            break;
+        default:
+            return 0;
+    }
+
+    cpu->PC = cpu_pop16(cpu);
+    return 1;
+}
+
 // Per-opcode base cycle cost, straight from the MC6809 datasheet timing
 // table. Indexed by opcode byte; entries left at 0 are opcodes cpu_step()
 // doesn't implement yet (the default: case below handles those and halts,
@@ -263,6 +333,16 @@ static const uint8_t opcode_cycles[256] = {
 };
 
 int cpu_step(Cpu *cpu) {
+    // HLE interception happens before any opcode fetch/decode: if PC is
+    // sitting on a known BIOS routine address, the native handler runs (and
+    // simulates the RTS) instead of whatever's actually at that address in
+    // the loaded ROM. No cycle cost is charged here -- these are native
+    // substitutes for routines of unknown/variable real timing, not
+    // something we can honestly cost against the datasheet table.
+    if (cpu_try_hle(cpu)) {
+        return 1;
+    }
+
     uint16_t opcode_pc = cpu->PC;
     uint8_t opcode = mem_read8(cpu->PC);
     cpu->PC++;

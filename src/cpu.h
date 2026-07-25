@@ -91,6 +91,17 @@
 #define OP_JSR_EXT 0xBD
 #define OP_RTS 0x39
 
+// HLE (high-level emulation) BIOS routine addresses. When PC lands on one of
+// these, cpu_step() calls a native handler instead of executing whatever
+// 6809 bytes are actually sitting there, then simulates the RTS.
+#define HLE_DRAW_VL     0xF3DD
+// Confirmed against the real loaded BIOS: $F192 opens LDX/LEAX/STX (a
+// memory-counter increment idiom) then BSR / LDA #imm / CMPA direct / BEQ -4
+// -- a textbook poll-until-flag-matches loop, i.e. genuinely a wait routine.
+// $F2EB, by contrast, is just ordinary sequential load/store/call code with
+// no wait-loop shape -- see dump_bios_bytes() output in main.c.
+#define HLE_WAIT_RECAL  0xF192
+
 typedef enum {
     ADDR_DIRECT,
     ADDR_EXTENDED,
@@ -122,5 +133,9 @@ typedef struct {
 void cpu_reset(Cpu *cpu);
 void cpu_print_state(const Cpu *cpu);
 int cpu_step(Cpu *cpu);
+
+// Debug-only: temporarily disable/enable HLE BIOS interception so real ROM
+// bytes execute even at a normally-hooked address (see main.c's BIOS tracer).
+void cpu_set_hle_enabled(int enabled);
 
 #endif // CPU_H
