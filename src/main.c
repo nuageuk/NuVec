@@ -19,5 +19,12 @@ int main(void) {
     cpu_reset(&cpu);
     cpu_print_state(&cpu);
 
+    mem_write8(RAM_START, 0x86);
+    mem_write8(RAM_START + 1, 0x05);
+    cpu.PC = RAM_START;
+
+    cpu_step(&cpu);
+    cpu_print_state(&cpu);
+
     return 0;
 }

@@ -15,6 +15,9 @@
 
 #define RESET_VECTOR 0xFFFE
 
+// Opcodes
+#define OP_LDA_IMM 0x86
+
 typedef struct {
     // Struct/uint16_t aliasing here assumes a little-endian target (x86/x86_64).
     union {
@@ -37,5 +40,6 @@ typedef struct {
 
 void cpu_reset(Cpu *cpu);
 void cpu_print_state(const Cpu *cpu);
+int cpu_step(Cpu *cpu);
 
 #endif // CPU_H

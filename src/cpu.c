@@ -14,6 +14,29 @@ void cpu_reset(Cpu *cpu) {
     cpu->PC = (uint16_t)(hi << 8) | lo;
 }
 
+int cpu_step(Cpu *cpu) {
+    uint16_t opcode_pc = cpu->PC;
+    uint8_t opcode = mem_read8(cpu->PC);
+    cpu->PC++;
+
+    switch (opcode) {
+        case OP_LDA_IMM: {
+            uint8_t value = mem_read8(cpu->PC);
+            cpu->PC++;
+
+            cpu->A = value;
+
+            if (value & 0x80) cpu->CC |= CC_N; else cpu->CC &= ~CC_N;
+            if (value == 0)   cpu->CC |= CC_Z; else cpu->CC &= ~CC_Z;
+
+            return 1;
+        }
+        default:
+            printf("unimplemented opcode 0x%02X at PC=0x%04X\n", opcode, opcode_pc);
+            return 0;
+    }
+}
+
 void cpu_print_state(const Cpu *cpu) {
     printf("A=%02X B=%02X D=%04X\n", cpu->A, cpu->B, cpu->D);
     printf("X=%04X Y=%04X U=%04X S=%04X PC=%04X\n",
