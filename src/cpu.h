@@ -19,6 +19,7 @@
 #define OP_LDA_IMM 0x86
 #define OP_LDA_DIR 0x96
 #define OP_LDA_EXT 0xB6
+#define OP_LDA_IDX 0xA6
 
 #define OP_LDB_IMM 0xC6
 #define OP_LDB_DIR 0xD6
@@ -27,6 +28,7 @@
 #define OP_LDX_IMM 0x8E
 #define OP_LDX_DIR 0x9E
 #define OP_LDX_EXT 0xBE
+#define OP_LDX_IDX 0xAE
 
 #define OP_LDU_IMM 0xCE
 #define OP_LDU_DIR 0xDE
@@ -34,12 +36,14 @@
 
 #define OP_STA_DIR 0x97
 #define OP_STA_EXT 0xB7
+#define OP_STA_IDX 0xA7
 
 #define OP_STB_DIR 0xD7
 #define OP_STB_EXT 0xF7
 
 #define OP_STX_DIR 0x9F
 #define OP_STX_EXT 0xBF
+#define OP_STX_IDX 0xAF
 
 #define OP_STU_DIR 0xDF
 #define OP_STU_EXT 0xFF
@@ -89,7 +93,8 @@
 
 typedef enum {
     ADDR_DIRECT,
-    ADDR_EXTENDED
+    ADDR_EXTENDED,
+    ADDR_INDEXED
 } AddrMode;
 
 typedef struct {

@@ -200,6 +200,61 @@ int main(int argc, char *argv[]) {
         cpu_print_state(&cpu);
     }
 
+    // Indexed addressing (,X): zero-offset load, zero-offset store, ,X+
+    // post-increment (checking X actually advances), and an 8-bit offset
+    // load. Threaded as one sequential program so each step's expectations
+    // depend on the previous step's side effects actually having happened.
+    {
+        mem_write8(0xC200, 0xAB); // fixture for the zero-offset load
+        mem_write8(0xC201, 0x33); // fixture proving X really moved after ,X+
+        mem_write8(0xC206, 0x99); // fixture for the 8-bit-offset load (X=0xC201 + 5)
+
+        cpu.X = 0xC200;
+        const uint16_t prog = RAM_START + 0x300; // 0xC300, clear of every earlier phase
+
+        mem_write8(prog + 0,  0xA6); mem_write8(prog + 1,  0x84);                           // LDA ,X
+        mem_write8(prog + 2,  0x86); mem_write8(prog + 3,  0x7F);                           // LDA #$7F
+        mem_write8(prog + 4,  0xA7); mem_write8(prog + 5,  0x84);                           // STA ,X
+        mem_write8(prog + 6,  0xA6); mem_write8(prog + 7,  0x80);                           // LDA ,X+
+        mem_write8(prog + 8,  0xA6); mem_write8(prog + 9,  0x84);                           // LDA ,X
+        mem_write8(prog + 10, 0xA6); mem_write8(prog + 11, 0x88); mem_write8(prog + 12, 0x05); // LDA 5,X
+
+        cpu.PC = prog;
+        cpu_step(&cpu); // LDA ,X   -> A should be the 0xC200 fixture
+        uint8_t zero_offset_load = cpu.A;
+
+        cpu_step(&cpu); // LDA #$7F
+        cpu_step(&cpu); // STA ,X   -> writes 0x7F to 0xC200 (X still 0xC200)
+        uint8_t stored_back = mem_read8(0xC200);
+
+        cpu_step(&cpu); // LDA ,X+  -> reads 0xC200 (the just-stored 0x7F), then X becomes 0xC201
+        uint8_t postinc_load = cpu.A;
+        uint16_t x_after_postinc = cpu.X;
+
+        cpu_step(&cpu); // LDA ,X   -> reads 0xC201's distinct fixture, proving X really advanced
+        uint8_t advance_check = cpu.A;
+
+        cpu_step(&cpu); // LDA 5,X  -> reads 0xC201+5 = 0xC206
+        uint8_t offset_load = cpu.A;
+
+        int ok = zero_offset_load == 0xAB
+               && stored_back == 0x7F
+               && postinc_load == 0x7F
+               && x_after_postinc == 0xC201
+               && advance_check == 0x33
+               && offset_load == 0x99
+               && cpu.X == 0xC201; // 8-bit offset must not itself modify X
+
+        if (ok) {
+            printf("indexed addressing test PASSED (,X=%02X, store round-trip=%02X, ,X+=%02X then X=%04X, ,X after=%02X, 5,X=%02X)\n",
+                   zero_offset_load, stored_back, postinc_load, x_after_postinc, advance_check, offset_load);
+        } else {
+            printf("indexed addressing test FAILED (,X=%02X, store=%02X, ,X+=%02X X=%04X, ,X=%02X, 5,X=%02X, final X=%04X)\n",
+                   zero_offset_load, stored_back, postinc_load, x_after_postinc, advance_check, offset_load, cpu.X);
+        }
+        cpu_print_state(&cpu);
+    }
+
     if (!display_init()) {
         fprintf(stderr, "Failed to initialize display\n");
         return 1;

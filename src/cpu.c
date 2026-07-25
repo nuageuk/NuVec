@@ -25,33 +25,120 @@ static void set_nz16(Cpu *cpu, uint16_t value) {
     if (value == 0)     cpu->CC |= CC_Z; else cpu->CC &= ~CC_Z;
 }
 
-// Resolves DIRECT/EXTENDED effective addresses, consuming the operand
-// byte(s) at cpu->PC and advancing PC past them.
+static uint16_t *cpu_index_register(Cpu *cpu, uint8_t rr) {
+    switch (rr) {
+        case 0: return &cpu->X;
+        case 1: return &cpu->Y;
+        case 2: return &cpu->U;
+        default: return &cpu->S; // 3
+    }
+}
+
+// Decodes one 6809 indexed-addressing postbyte and resolves it to an
+// effective address, per the MC6809 datasheet's postbyte table. Implements
+// the common non-indirect subset only:
+//   0 RR nnnnn         -- 5-bit signed constant offset
+//   1 RR 0 00000 (,R+)    -- post-increment by 1
+//   1 RR 0 00001 (,R++)   -- post-increment by 2
+//   1 RR 0 00010 (,-R)    -- pre-decrement by 1
+//   1 RR 0 00011 (,--R)   -- pre-decrement by 2
+//   1 RR 0 00100 (,R)     -- zero offset
+//   1 RR 0 01000 (n8,R)   -- 8-bit signed offset follows
+//   1 RR 0 01001 (n16,R)  -- 16-bit signed offset follows (big-endian)
+// where RR selects the register: 00=X, 01=Y, 10=U, 11=S.
 //
-// IMMEDIATE is deliberately not a case here. DIRECT/EXTENDED both follow the
-// same shape: fetch operand bytes of a fixed size (1 or 2, regardless of the
-// destination register), combine them into an effective address, then the
-// caller dereferences that address separately. IMMEDIATE has no dereference
-// step at all -- the fetched bytes ARE the value -- and the fetch width
-// depends on the destination register (1 byte for A/B, 2 bytes for X/U), not
-// on the addressing mode. Forcing it through this function would mean either
-// returning PC as a fake "address" (misleading, since nothing is dereferenced
-// through the normal memory-routing path conceptually) or adding a width
-// parameter that only IMMEDIATE would use. Simpler to keep it inline per
-// instruction, as before.
-static uint16_t cpu_resolve_address(Cpu *cpu, AddrMode mode) {
+// NOT implemented: indirect modes (bit 4 of the postbyte set, i.e. an extra
+// memory dereference on top of the computed address) and accumulator-offset
+// modes (A,R / B,R / D,R) or PC-relative. Those fail loudly -- print a
+// diagnostic and return 0 -- rather than silently resolving to the wrong
+// address, same as an unimplemented opcode.
+static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
+    uint8_t postbyte = mem_read8(cpu->PC);
+    cpu->PC++;
+
+    uint8_t rr = (postbyte >> 5) & 0x03;
+    uint16_t *reg = cpu_index_register(cpu, rr);
+
+    if ((postbyte & 0x80) == 0) {
+        // 0 RR nnnnn: sign-extend the low 5 bits (bit 4 is the sign bit).
+        int8_t offset = (int8_t)((postbyte & 0x1F) << 3) >> 3;
+        *out_addr = (uint16_t)(*reg + offset);
+        return 1;
+    }
+
+    switch (postbyte & 0x1F) {
+        case 0x00: // ,R+
+            *out_addr = *reg;
+            *reg = (uint16_t)(*reg + 1);
+            return 1;
+        case 0x01: // ,R++
+            *out_addr = *reg;
+            *reg = (uint16_t)(*reg + 2);
+            return 1;
+        case 0x02: // ,-R
+            *reg = (uint16_t)(*reg - 1);
+            *out_addr = *reg;
+            return 1;
+        case 0x03: // ,--R
+            *reg = (uint16_t)(*reg - 2);
+            *out_addr = *reg;
+            return 1;
+        case 0x04: // ,R
+            *out_addr = *reg;
+            return 1;
+        case 0x08: { // n8,R
+            int8_t offset = (int8_t)mem_read8(cpu->PC);
+            cpu->PC++;
+            *out_addr = (uint16_t)(*reg + offset);
+            return 1;
+        }
+        case 0x09: { // n16,R
+            uint8_t hi = mem_read8(cpu->PC);
+            uint8_t lo = mem_read8(cpu->PC + 1);
+            cpu->PC += 2;
+            int16_t offset = (int16_t)(((uint16_t)hi << 8) | lo);
+            *out_addr = (uint16_t)(*reg + offset);
+            return 1;
+        }
+        default:
+            printf("unimplemented indexed postbyte 0x%02X at PC=0x%04X\n", postbyte, (uint16_t)(cpu->PC - 1));
+            return 0;
+    }
+}
+
+// Resolves DIRECT/EXTENDED/INDEXED effective addresses, consuming the
+// operand byte(s) at cpu->PC and advancing PC past them. Returns 1 on
+// success with *out_addr set, or 0 if an indexed postbyte encoded a submode
+// this emulator doesn't implement (see cpu_resolve_indexed) -- DIRECT and
+// EXTENDED can never fail.
+//
+// IMMEDIATE is deliberately not a case here. DIRECT/EXTENDED/INDEXED all
+// follow the same shape: fetch operand byte(s), combine into an effective
+// address, then the caller dereferences that address separately. IMMEDIATE
+// has no dereference step at all -- the fetched bytes ARE the value -- and
+// the fetch width depends on the destination register (1 byte for A/B, 2
+// bytes for X/U), not on the addressing mode. Forcing it through this
+// function would mean either returning PC as a fake "address" (misleading,
+// since nothing is dereferenced through the normal memory-routing path
+// conceptually) or adding a width parameter that only IMMEDIATE would use.
+// Simpler to keep it inline per instruction, as before.
+static int cpu_resolve_address(Cpu *cpu, AddrMode mode, uint16_t *out_addr) {
     switch (mode) {
         case ADDR_DIRECT: {
             uint8_t operand = mem_read8(cpu->PC);
             cpu->PC++;
-            return ((uint16_t)cpu->DP << 8) | operand;
+            *out_addr = ((uint16_t)cpu->DP << 8) | operand;
+            return 1;
         }
         case ADDR_EXTENDED: {
             uint8_t hi = mem_read8(cpu->PC);
             uint8_t lo = mem_read8(cpu->PC + 1);
             cpu->PC += 2;
-            return ((uint16_t)hi << 8) | lo;
+            *out_addr = ((uint16_t)hi << 8) | lo;
+            return 1;
         }
+        case ADDR_INDEXED:
+            return cpu_resolve_indexed(cpu, out_addr);
     }
     return 0; // unreachable
 }
@@ -146,14 +233,18 @@ static uint16_t cpu_pop16(Cpu *cpu) {
 // doesn't implement yet (the default: case below handles those and halts,
 // so their cost is moot -- 0 just avoids leaving a gap in the accounting).
 static const uint8_t opcode_cycles[256] = {
-    [OP_LDA_IMM] = 2, [OP_LDA_DIR] = 4, [OP_LDA_EXT] = 5,
+    [OP_LDA_IMM] = 2, [OP_LDA_DIR] = 4, [OP_LDA_EXT] = 5, [OP_LDA_IDX] = 4,
     [OP_LDB_IMM] = 2, [OP_LDB_DIR] = 4, [OP_LDB_EXT] = 5,
-    [OP_LDX_IMM] = 3, [OP_LDX_DIR] = 5, [OP_LDX_EXT] = 6,
+    [OP_LDX_IMM] = 3, [OP_LDX_DIR] = 5, [OP_LDX_EXT] = 6, [OP_LDX_IDX] = 5,
     [OP_LDU_IMM] = 3, [OP_LDU_DIR] = 5, [OP_LDU_EXT] = 6,
 
-    [OP_STA_DIR] = 4, [OP_STA_EXT] = 5,
+    // Indexed entries are the datasheet's base ,R cost. Real indexed timing
+    // varies with the postbyte submode (offset bytes add cycles, auto
+    // inc/dec by 2 adds one more, etc.) -- not modeled yet, consistent with
+    // cpu_resolve_indexed() itself only covering the common submodes.
+    [OP_STA_DIR] = 4, [OP_STA_EXT] = 5, [OP_STA_IDX] = 4,
     [OP_STB_DIR] = 4, [OP_STB_EXT] = 5,
-    [OP_STX_DIR] = 5, [OP_STX_EXT] = 6,
+    [OP_STX_DIR] = 5, [OP_STX_EXT] = 6, [OP_STX_IDX] = 5,
     [OP_STU_DIR] = 5, [OP_STU_EXT] = 6,
 
     [OP_ADDA_IMM] = 2, [OP_ADDA_DIR] = 4, [OP_ADDA_EXT] = 5,
@@ -192,8 +283,11 @@ int cpu_step(Cpu *cpu) {
             return 1;
         }
         case OP_LDA_DIR:
-        case OP_LDA_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_LDA_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+        case OP_LDA_EXT:
+        case OP_LDA_IDX: {
+            AddrMode mode = opcode == OP_LDA_DIR ? ADDR_DIRECT : opcode == OP_LDA_EXT ? ADDR_EXTENDED : ADDR_INDEXED;
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, mode, &addr)) return 0;
             uint8_t value = mem_read8(addr);
 
             cpu->A = value;
@@ -211,7 +305,8 @@ int cpu_step(Cpu *cpu) {
         }
         case OP_LDB_DIR:
         case OP_LDB_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_LDB_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_LDB_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             uint8_t value = mem_read8(addr);
 
             cpu->B = value;
@@ -230,8 +325,11 @@ int cpu_step(Cpu *cpu) {
             return 1;
         }
         case OP_LDX_DIR:
-        case OP_LDX_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_LDX_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+        case OP_LDX_EXT:
+        case OP_LDX_IDX: {
+            AddrMode mode = opcode == OP_LDX_DIR ? ADDR_DIRECT : opcode == OP_LDX_EXT ? ADDR_EXTENDED : ADDR_INDEXED;
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, mode, &addr)) return 0;
             uint8_t hi = mem_read8(addr);
             uint8_t lo = mem_read8(addr + 1);
             uint16_t value = ((uint16_t)hi << 8) | lo;
@@ -253,7 +351,8 @@ int cpu_step(Cpu *cpu) {
         }
         case OP_LDU_DIR:
         case OP_LDU_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_LDU_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_LDU_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             uint8_t hi = mem_read8(addr);
             uint8_t lo = mem_read8(addr + 1);
             uint16_t value = ((uint16_t)hi << 8) | lo;
@@ -264,22 +363,29 @@ int cpu_step(Cpu *cpu) {
         }
 
         case OP_STA_DIR:
-        case OP_STA_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_STA_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+        case OP_STA_EXT:
+        case OP_STA_IDX: {
+            AddrMode mode = opcode == OP_STA_DIR ? ADDR_DIRECT : opcode == OP_STA_EXT ? ADDR_EXTENDED : ADDR_INDEXED;
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, mode, &addr)) return 0;
             mem_write8(addr, cpu->A);
             return 1;
         }
 
         case OP_STB_DIR:
         case OP_STB_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_STB_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_STB_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             mem_write8(addr, cpu->B);
             return 1;
         }
 
         case OP_STX_DIR:
-        case OP_STX_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_STX_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+        case OP_STX_EXT:
+        case OP_STX_IDX: {
+            AddrMode mode = opcode == OP_STX_DIR ? ADDR_DIRECT : opcode == OP_STX_EXT ? ADDR_EXTENDED : ADDR_INDEXED;
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, mode, &addr)) return 0;
             mem_write8(addr, (uint8_t)(cpu->X >> 8));
             mem_write8(addr + 1, (uint8_t)(cpu->X & 0xFF));
             return 1;
@@ -287,7 +393,8 @@ int cpu_step(Cpu *cpu) {
 
         case OP_STU_DIR:
         case OP_STU_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_STU_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_STU_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             mem_write8(addr, (uint8_t)(cpu->U >> 8));
             mem_write8(addr + 1, (uint8_t)(cpu->U & 0xFF));
             return 1;
@@ -301,7 +408,8 @@ int cpu_step(Cpu *cpu) {
         }
         case OP_ADDA_DIR:
         case OP_ADDA_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_ADDA_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_ADDA_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             cpu_add8(cpu, &cpu->A, mem_read8(addr));
             return 1;
         }
@@ -314,7 +422,8 @@ int cpu_step(Cpu *cpu) {
         }
         case OP_ADDB_DIR:
         case OP_ADDB_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_ADDB_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_ADDB_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             cpu_add8(cpu, &cpu->B, mem_read8(addr));
             return 1;
         }
@@ -327,7 +436,8 @@ int cpu_step(Cpu *cpu) {
         }
         case OP_SUBA_DIR:
         case OP_SUBA_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_SUBA_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_SUBA_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             cpu_sub8(cpu, &cpu->A, mem_read8(addr), 1);
             return 1;
         }
@@ -340,7 +450,8 @@ int cpu_step(Cpu *cpu) {
         }
         case OP_SUBB_DIR:
         case OP_SUBB_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_SUBB_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_SUBB_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             cpu_sub8(cpu, &cpu->B, mem_read8(addr), 1);
             return 1;
         }
@@ -353,7 +464,8 @@ int cpu_step(Cpu *cpu) {
         }
         case OP_CMPA_DIR:
         case OP_CMPA_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_CMPA_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_CMPA_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             cpu_sub8(cpu, &cpu->A, mem_read8(addr), 0);
             return 1;
         }
@@ -366,7 +478,8 @@ int cpu_step(Cpu *cpu) {
         }
         case OP_CMPB_DIR:
         case OP_CMPB_EXT: {
-            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_CMPB_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, opcode == OP_CMPB_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             cpu_sub8(cpu, &cpu->B, mem_read8(addr), 0);
             return 1;
         }
@@ -414,7 +527,8 @@ int cpu_step(Cpu *cpu) {
 
         case OP_JSR_DIR:
         case OP_JSR_EXT: {
-            uint16_t target = cpu_resolve_address(cpu, opcode == OP_JSR_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            uint16_t target;
+            if (!cpu_resolve_address(cpu, opcode == OP_JSR_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &target)) return 0;
             cpu_push16(cpu, cpu->PC); // return address: PC after the full JSR instruction
             cpu->PC = target;
             return 1;
