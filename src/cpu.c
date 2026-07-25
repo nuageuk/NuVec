@@ -55,6 +55,58 @@ static uint16_t cpu_resolve_address(Cpu *cpu, AddrMode mode) {
     return 0; // unreachable
 }
 
+static void cpu_add8(Cpu *cpu, uint8_t *reg, uint8_t operand) {
+    uint8_t a = *reg;
+    uint16_t wide = (uint16_t)a + (uint16_t)operand;
+    uint8_t result = (uint8_t)wide;
+    *reg = result;
+
+    set_nz8(cpu, result);
+
+    // V: operands share a sign and the result's sign differs from it.
+    if ((~(a ^ operand) & (a ^ result)) & 0x80) cpu->CC |= CC_V; else cpu->CC &= ~CC_V;
+
+    // C: unsigned carry out of bit 7.
+    if (wide & 0x100) cpu->CC |= CC_C; else cpu->CC &= ~CC_C;
+}
+
+// Shared by SUB (store_result != 0) and CMP (store_result == 0, flags-only).
+static void cpu_sub8(Cpu *cpu, uint8_t *reg, uint8_t operand, int store_result) {
+    uint8_t a = *reg;
+    uint8_t result = (uint8_t)(a - operand);
+    if (store_result) *reg = result;
+
+    set_nz8(cpu, result);
+
+    // V: operands differ in sign and the result's sign differs from the minuend.
+    if (((a ^ operand) & (a ^ result)) & 0x80) cpu->CC |= CC_V; else cpu->CC &= ~CC_V;
+
+    // C: borrow -- unsigned subtrahend exceeded unsigned minuend.
+    if (operand > a) cpu->CC |= CC_C; else cpu->CC &= ~CC_C;
+}
+
+static void cpu_inc8(Cpu *cpu, uint8_t *reg) {
+    uint8_t a = *reg;
+    uint8_t result = (uint8_t)(a + 1);
+    *reg = result;
+
+    set_nz8(cpu, result);
+
+    // V only fires on the one edge case: $7F -> $80. C is untouched by INC.
+    if (a == 0x7F) cpu->CC |= CC_V; else cpu->CC &= ~CC_V;
+}
+
+static void cpu_dec8(Cpu *cpu, uint8_t *reg) {
+    uint8_t a = *reg;
+    uint8_t result = (uint8_t)(a - 1);
+    *reg = result;
+
+    set_nz8(cpu, result);
+
+    // V only fires on the one edge case: $80 -> $7F. C is untouched by DEC.
+    if (a == 0x80) cpu->CC |= CC_V; else cpu->CC &= ~CC_V;
+}
+
 int cpu_step(Cpu *cpu) {
     uint16_t opcode_pc = cpu->PC;
     uint8_t opcode = mem_read8(cpu->PC);
@@ -170,6 +222,97 @@ int cpu_step(Cpu *cpu) {
             mem_write8(addr + 1, (uint8_t)(cpu->U & 0xFF));
             return 1;
         }
+
+        case OP_ADDA_IMM: {
+            uint8_t operand = mem_read8(cpu->PC);
+            cpu->PC++;
+            cpu_add8(cpu, &cpu->A, operand);
+            return 1;
+        }
+        case OP_ADDA_DIR:
+        case OP_ADDA_EXT: {
+            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_ADDA_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            cpu_add8(cpu, &cpu->A, mem_read8(addr));
+            return 1;
+        }
+
+        case OP_ADDB_IMM: {
+            uint8_t operand = mem_read8(cpu->PC);
+            cpu->PC++;
+            cpu_add8(cpu, &cpu->B, operand);
+            return 1;
+        }
+        case OP_ADDB_DIR:
+        case OP_ADDB_EXT: {
+            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_ADDB_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            cpu_add8(cpu, &cpu->B, mem_read8(addr));
+            return 1;
+        }
+
+        case OP_SUBA_IMM: {
+            uint8_t operand = mem_read8(cpu->PC);
+            cpu->PC++;
+            cpu_sub8(cpu, &cpu->A, operand, 1);
+            return 1;
+        }
+        case OP_SUBA_DIR:
+        case OP_SUBA_EXT: {
+            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_SUBA_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            cpu_sub8(cpu, &cpu->A, mem_read8(addr), 1);
+            return 1;
+        }
+
+        case OP_SUBB_IMM: {
+            uint8_t operand = mem_read8(cpu->PC);
+            cpu->PC++;
+            cpu_sub8(cpu, &cpu->B, operand, 1);
+            return 1;
+        }
+        case OP_SUBB_DIR:
+        case OP_SUBB_EXT: {
+            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_SUBB_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            cpu_sub8(cpu, &cpu->B, mem_read8(addr), 1);
+            return 1;
+        }
+
+        case OP_CMPA_IMM: {
+            uint8_t operand = mem_read8(cpu->PC);
+            cpu->PC++;
+            cpu_sub8(cpu, &cpu->A, operand, 0);
+            return 1;
+        }
+        case OP_CMPA_DIR:
+        case OP_CMPA_EXT: {
+            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_CMPA_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            cpu_sub8(cpu, &cpu->A, mem_read8(addr), 0);
+            return 1;
+        }
+
+        case OP_CMPB_IMM: {
+            uint8_t operand = mem_read8(cpu->PC);
+            cpu->PC++;
+            cpu_sub8(cpu, &cpu->B, operand, 0);
+            return 1;
+        }
+        case OP_CMPB_DIR:
+        case OP_CMPB_EXT: {
+            uint16_t addr = cpu_resolve_address(cpu, opcode == OP_CMPB_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            cpu_sub8(cpu, &cpu->B, mem_read8(addr), 0);
+            return 1;
+        }
+
+        case OP_INCA:
+            cpu_inc8(cpu, &cpu->A);
+            return 1;
+        case OP_INCB:
+            cpu_inc8(cpu, &cpu->B);
+            return 1;
+        case OP_DECA:
+            cpu_dec8(cpu, &cpu->A);
+            return 1;
+        case OP_DECB:
+            cpu_dec8(cpu, &cpu->B);
+            return 1;
 
         default:
             printf("unimplemented opcode 0x%02X at PC=0x%04X\n", opcode, opcode_pc);
