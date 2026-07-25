@@ -26,14 +26,13 @@ void mem_write8(uint16_t address, uint8_t value) {
     // Writes to ROM or unmapped regions are ignored for now
 }
 
-int mem_load_rom(const char* filepath) {
-    
+int mem_load_rom(const char* filepath, uint8_t* dest, size_t max_size) {
     FILE* f = fopen(filepath, "rb");
     if (!f) {
-        return 0; // failed to open
+        return 0;
     }
 
-    size_t bytes_read = fread(cart_rom, 1, CART_ROM_SIZE, f);
+    size_t bytes_read = fread(dest, 1, max_size, f);
     fclose(f);
 
     return bytes_read > 0;

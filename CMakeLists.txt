@@ -4,4 +4,4 @@ project(NuVec C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_executable(NuVec src/main.c src/memory.c)
+add_executable(NuVec src/main.c src/memory.c src/cpu.c)

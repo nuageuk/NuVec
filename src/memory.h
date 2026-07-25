@@ -18,8 +18,8 @@
 #define VIA_END          0xD7FF
 
 // BIOS ROM
-#define BIOS_ROM_START   0xE000
-#define BIOS_ROM_END     0xFFFF
+#define BIOS_ROM_START  0xF000
+#define BIOS_ROM_END    0xFFFF
 
 #include <stdint.h>
 
@@ -33,7 +33,7 @@ void mem_write8(uint16_t address, uint8_t value);
 
 extern uint8_t cart_rom[CART_ROM_SIZE];
 
-int mem_load_rom(const char* filepath);
+int mem_load_rom(const char* filepath, uint8_t* dest, size_t max_size);
 
 
 #endif // MEMORY_H
