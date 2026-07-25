@@ -120,6 +120,26 @@ static void cpu_branch(Cpu *cpu, int take) {
     }
 }
 
+// The 6809 stack grows downward. Pushing a 16-bit value decrements S then
+// writes, high byte first (at S-1) then low byte (at S-2) -- so after the
+// push S is down by 2 and the low byte sits at the lower address. Popping
+// reverses this: read low byte first (at S), then high byte (at S+1), then
+// increment S by 2.
+static void cpu_push16(Cpu *cpu, uint16_t value) {
+    cpu->S--;
+    mem_write8(cpu->S, (uint8_t)(value >> 8));
+    cpu->S--;
+    mem_write8(cpu->S, (uint8_t)(value & 0xFF));
+}
+
+static uint16_t cpu_pop16(Cpu *cpu) {
+    uint8_t lo = mem_read8(cpu->S);
+    cpu->S++;
+    uint8_t hi = mem_read8(cpu->S);
+    cpu->S++;
+    return ((uint16_t)hi << 8) | lo;
+}
+
 int cpu_step(Cpu *cpu) {
     uint16_t opcode_pc = cpu->PC;
     uint8_t opcode = mem_read8(cpu->PC);
@@ -353,6 +373,18 @@ int cpu_step(Cpu *cpu) {
             return 1;
         case OP_BVS:
             cpu_branch(cpu, (cpu->CC & CC_V) != 0);
+            return 1;
+
+        case OP_JSR_DIR:
+        case OP_JSR_EXT: {
+            uint16_t target = cpu_resolve_address(cpu, opcode == OP_JSR_DIR ? ADDR_DIRECT : ADDR_EXTENDED);
+            cpu_push16(cpu, cpu->PC); // return address: PC after the full JSR instruction
+            cpu->PC = target;
+            return 1;
+        }
+
+        case OP_RTS:
+            cpu->PC = cpu_pop16(cpu);
             return 1;
 
         default:

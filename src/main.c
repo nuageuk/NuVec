@@ -80,5 +80,36 @@ int main(void) {
     }
     cpu_print_state(&cpu);
 
+    // JSR/RTS: call a subroutine that increments A, then return.
+    // S isn't set by cpu_reset() (real hardware relies on BIOS for that), so
+    // the test has to give it a sensible RAM address itself.
+    cpu.S = 0xC780;
+    uint16_t initial_s = cpu.S;
+
+    mem_write8(RAM_START + 19, 0x86); // LDA #$00           (reset A before the call)
+    mem_write8(RAM_START + 20, 0x00);
+    mem_write8(RAM_START + 21, 0xBD); // JSR extended $C028 -> return addr is RAM_START+24
+    mem_write8(RAM_START + 22, 0xC0);
+    mem_write8(RAM_START + 23, 0x28);
+    // RAM_START + 24: instruction resumed here after RTS (not executed by this test)
+
+    mem_write8(RAM_START + 40, 0x4C); // subroutine @ $C028: INCA
+    mem_write8(RAM_START + 41, 0x39); //                     RTS
+
+    cpu.PC = RAM_START + 19;
+    cpu_step(&cpu); // LDA #$00
+    cpu_step(&cpu); // JSR extended
+    cpu_step(&cpu); // INCA (inside subroutine)
+    cpu_step(&cpu); // RTS
+
+    if (cpu.PC == RAM_START + 24 && cpu.A == 0x01 && cpu.S == initial_s) {
+        printf("JSR/RTS test PASSED (PC=%04X resumed correctly, A=%02X ran once, S=%04X balanced)\n",
+               cpu.PC, cpu.A, cpu.S);
+    } else {
+        printf("JSR/RTS test FAILED (PC=%04X, A=%02X, S=%04X, expected PC=%04X, A=01, S=%04X)\n",
+               cpu.PC, cpu.A, cpu.S, RAM_START + 24, initial_s);
+    }
+    cpu_print_state(&cpu);
+
     return 0;
 }

@@ -83,6 +83,10 @@
 #define OP_BPL 0x2A
 #define OP_BMI 0x2B
 
+#define OP_JSR_DIR 0x9D
+#define OP_JSR_EXT 0xBD
+#define OP_RTS 0x39
+
 typedef enum {
     ADDR_DIRECT,
     ADDR_EXTENDED
