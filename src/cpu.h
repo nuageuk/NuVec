@@ -44,6 +44,11 @@
 #define OP_STU_DIR 0xDF
 #define OP_STU_EXT 0xFF
 
+typedef enum {
+    ADDR_DIRECT,
+    ADDR_EXTENDED
+} AddrMode;
+
 typedef struct {
     // Struct/uint16_t aliasing here assumes a little-endian target (x86/x86_64).
     union {
