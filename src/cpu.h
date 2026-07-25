@@ -110,6 +110,8 @@ typedef struct {
 
     uint8_t DP; // Direct page register
     uint8_t CC; // Condition code register (packed flags)
+
+    uint64_t cycles; // total 6809 clock cycles executed since reset
 } Cpu;
 
 void cpu_reset(Cpu *cpu);

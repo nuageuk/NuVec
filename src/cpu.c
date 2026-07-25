@@ -1,5 +1,6 @@
 #include "cpu.h"
 #include "memory.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -140,10 +141,46 @@ static uint16_t cpu_pop16(Cpu *cpu) {
     return ((uint16_t)hi << 8) | lo;
 }
 
+// Per-opcode base cycle cost, straight from the MC6809 datasheet timing
+// table. Indexed by opcode byte; entries left at 0 are opcodes cpu_step()
+// doesn't implement yet (the default: case below handles those and halts,
+// so their cost is moot -- 0 just avoids leaving a gap in the accounting).
+static const uint8_t opcode_cycles[256] = {
+    [OP_LDA_IMM] = 2, [OP_LDA_DIR] = 4, [OP_LDA_EXT] = 5,
+    [OP_LDB_IMM] = 2, [OP_LDB_DIR] = 4, [OP_LDB_EXT] = 5,
+    [OP_LDX_IMM] = 3, [OP_LDX_DIR] = 5, [OP_LDX_EXT] = 6,
+    [OP_LDU_IMM] = 3, [OP_LDU_DIR] = 5, [OP_LDU_EXT] = 6,
+
+    [OP_STA_DIR] = 4, [OP_STA_EXT] = 5,
+    [OP_STB_DIR] = 4, [OP_STB_EXT] = 5,
+    [OP_STX_DIR] = 5, [OP_STX_EXT] = 6,
+    [OP_STU_DIR] = 5, [OP_STU_EXT] = 6,
+
+    [OP_ADDA_IMM] = 2, [OP_ADDA_DIR] = 4, [OP_ADDA_EXT] = 5,
+    [OP_ADDB_IMM] = 2, [OP_ADDB_DIR] = 4, [OP_ADDB_EXT] = 5,
+    [OP_SUBA_IMM] = 2, [OP_SUBA_DIR] = 4, [OP_SUBA_EXT] = 5,
+    [OP_SUBB_IMM] = 2, [OP_SUBB_DIR] = 4, [OP_SUBB_EXT] = 5,
+    [OP_CMPA_IMM] = 2, [OP_CMPA_DIR] = 4, [OP_CMPA_EXT] = 5,
+    [OP_CMPB_IMM] = 2, [OP_CMPB_DIR] = 4, [OP_CMPB_EXT] = 5,
+
+    [OP_INCA] = 2, [OP_INCB] = 2, [OP_DECA] = 2, [OP_DECB] = 2,
+
+    [OP_BRA] = 3, [OP_BCC] = 3, [OP_BCS] = 3, [OP_BNE] = 3, [OP_BEQ] = 3,
+    [OP_BVC] = 3, [OP_BVS] = 3, [OP_BPL] = 3, [OP_BMI] = 3,
+
+    [OP_JSR_DIR] = 7, [OP_JSR_EXT] = 8, [OP_RTS] = 5,
+};
+
 int cpu_step(Cpu *cpu) {
     uint16_t opcode_pc = cpu->PC;
     uint8_t opcode = mem_read8(cpu->PC);
     cpu->PC++;
+
+    // Cycle cost is a fixed property of the opcode byte for every
+    // instruction implemented so far (none of our branches vary cost by
+    // taken/not-taken, unlike some other 8-bit CPUs), so it's safe to
+    // account for it up front rather than threading it through every case.
+    cpu->cycles += opcode_cycles[opcode];
 
     switch (opcode) {
         case OP_LDA_IMM: {
@@ -407,4 +444,5 @@ void cpu_print_state(const Cpu *cpu) {
            (cpu->CC & CC_Z) ? 'Z' : '-',
            (cpu->CC & CC_V) ? 'V' : '-',
            (cpu->CC & CC_C) ? 'C' : '-');
+    printf("Cycles=%" PRIu64 "\n", cpu->cycles);
 }
