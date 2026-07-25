@@ -107,6 +107,19 @@ static void cpu_dec8(Cpu *cpu, uint8_t *reg) {
     if (a == 0x80) cpu->CC |= CC_V; else cpu->CC &= ~CC_V;
 }
 
+// Fetches the signed 8-bit relative offset (always, whether or not the
+// branch is taken -- the byte still has to be consumed either way) and,
+// if take is nonzero, adds it to PC as already advanced past the full
+// 2-byte branch instruction. Branches never touch CC themselves.
+static void cpu_branch(Cpu *cpu, int take) {
+    int8_t offset = (int8_t)mem_read8(cpu->PC);
+    cpu->PC++;
+
+    if (take) {
+        cpu->PC = (uint16_t)(cpu->PC + offset);
+    }
+}
+
 int cpu_step(Cpu *cpu) {
     uint16_t opcode_pc = cpu->PC;
     uint8_t opcode = mem_read8(cpu->PC);
@@ -312,6 +325,34 @@ int cpu_step(Cpu *cpu) {
             return 1;
         case OP_DECB:
             cpu_dec8(cpu, &cpu->B);
+            return 1;
+
+        case OP_BRA:
+            cpu_branch(cpu, 1);
+            return 1;
+        case OP_BEQ:
+            cpu_branch(cpu, (cpu->CC & CC_Z) != 0);
+            return 1;
+        case OP_BNE:
+            cpu_branch(cpu, (cpu->CC & CC_Z) == 0);
+            return 1;
+        case OP_BCC:
+            cpu_branch(cpu, (cpu->CC & CC_C) == 0);
+            return 1;
+        case OP_BCS:
+            cpu_branch(cpu, (cpu->CC & CC_C) != 0);
+            return 1;
+        case OP_BPL:
+            cpu_branch(cpu, (cpu->CC & CC_N) == 0);
+            return 1;
+        case OP_BMI:
+            cpu_branch(cpu, (cpu->CC & CC_N) != 0);
+            return 1;
+        case OP_BVC:
+            cpu_branch(cpu, (cpu->CC & CC_V) == 0);
+            return 1;
+        case OP_BVS:
+            cpu_branch(cpu, (cpu->CC & CC_V) != 0);
             return 1;
 
         default:

@@ -73,6 +73,16 @@
 #define OP_DECA 0x4A
 #define OP_DECB 0x5A
 
+#define OP_BRA 0x20
+#define OP_BCC 0x24
+#define OP_BCS 0x25
+#define OP_BNE 0x26
+#define OP_BEQ 0x27
+#define OP_BVC 0x28
+#define OP_BVS 0x29
+#define OP_BPL 0x2A
+#define OP_BMI 0x2B
+
 typedef enum {
     ADDR_DIRECT,
     ADDR_EXTENDED

@@ -53,5 +53,32 @@ int main(void) {
     cpu_step(&cpu);
     cpu_print_state(&cpu);
 
+    // DECB/BNE loop: count B down from 3 to 0, using INCA to prove the loop
+    // body actually ran the expected number of times (not zero, not forever).
+    mem_write8(RAM_START + 11, 0x86);        // LDA #$00      (iteration counter)
+    mem_write8(RAM_START + 12, 0x00);
+    mem_write8(RAM_START + 13, 0xC6);        // LDB #$03      (loop counter)
+    mem_write8(RAM_START + 14, 0x03);
+    mem_write8(RAM_START + 15, 0x4C);        // loop: INCA
+    mem_write8(RAM_START + 16, 0x5A);        //       DECB
+    mem_write8(RAM_START + 17, 0x26);        //       BNE loop
+    mem_write8(RAM_START + 18, (uint8_t)-4); //       offset back to RAM_START+15
+
+    cpu.PC = RAM_START + 11;
+
+    int steps = 0;
+    const int max_steps = 100; // safety cap: a wrong-direction/infinite branch can't hang the test
+    while (cpu.PC != RAM_START + 19 && steps < max_steps) {
+        if (!cpu_step(&cpu)) break;
+        steps++;
+    }
+
+    if (steps == 11 && cpu.A == 0x03 && cpu.B == 0x00 && cpu.PC == RAM_START + 19) {
+        printf("loop test PASSED (%d cpu_step() calls, A=%02X iterations, B=%02X)\n", steps, cpu.A, cpu.B);
+    } else {
+        printf("loop test FAILED (%d cpu_step() calls, A=%02X, B=%02X, PC=%04X)\n", steps, cpu.A, cpu.B, cpu.PC);
+    }
+    cpu_print_state(&cpu);
+
     return 0;
 }
