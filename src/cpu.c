@@ -714,6 +714,7 @@ static const uint8_t opcode_cycles[256] = {
     [OP_MUL] = 11,
     [OP_CWAI] = 20,
     [OP_ANDCC] = 3,
+    [OP_ORCC] = 3,
     [OP_LEAX] = 4, [OP_LEAY] = 4, [OP_LEAS] = 4, [OP_LEAU] = 4,
 
     // PSHS/PULS cost (5 + 1 per byte transferred) depends on the postbyte's
@@ -1785,6 +1786,13 @@ static int cpu_step_dispatch(Cpu *cpu) {
             uint8_t mask = mem_read8(cpu->PC);
             cpu->PC++;
             cpu->CC &= mask;
+            return 1;
+        }
+
+        case OP_ORCC: {
+            uint8_t mask = mem_read8(cpu->PC);
+            cpu->PC++;
+            cpu->CC |= mask;
             return 1;
         }
 

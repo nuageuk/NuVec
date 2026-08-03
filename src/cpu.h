@@ -245,6 +245,7 @@
 #define OP_MUL 0x3D
 #define OP_CWAI 0x3C
 #define OP_ANDCC 0x1C
+#define OP_ORCC 0x1A
 
 #define OP_BSR 0x8D
 #define OP_LBRA 0x16
