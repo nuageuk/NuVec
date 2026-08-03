@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Stub-only diagnostics exposed by display_stub.c (not part of display.h --
+// the real SDL display.c doesn't implement these).
+long display_stub_line_count(void);
+int display_stub_get_bounds(int *out_min_x, int *out_max_x, int *out_min_y, int *out_max_y);
+
 // Headless trace harness (not part of the CMake/SDL build -- compiled and
 // run standalone). Loads the BIOS, optionally a cartridge from argv[1], then
 // free-runs cpu_step() for a fixed budget with HLE active, reporting whether
@@ -151,6 +156,14 @@ int main(int argc, char *argv[]) {
         printf("$%04X ", ring[(start + i) % RING]);
     }
     printf("\n");
+
+    long lines = display_stub_line_count();
+    printf("VIA-integrator display_draw_line() calls: %ld\n", lines);
+    int bx0, bx1, by0, by1;
+    if (display_stub_get_bounds(&bx0, &bx1, &by0, &by1)) {
+        printf("Drawn-line bounding box (screen px, origin 300,200): x=[%d,%d] y=[%d,%d]\n",
+               bx0, bx1, by0, by1);
+    }
 
     return 0;
 }

@@ -1,5 +1,4 @@
 #include "cpu.h"
-#include "display.h"
 #include "memory.h"
 #include "via.h"
 #include <inttypes.h>
@@ -579,60 +578,6 @@ static void cpu_set_reg8(Cpu *cpu, uint8_t nibble, uint8_t value) {
     }
 }
 
-// Draw_VL: X points at a vector list -- a count-minus-1 byte followed by
-// that many (dy, dx) signed-byte pairs, each a delta from the current pen
-// position. Intensity and BIOS-scale-register modeling are future work.
-static void hle_draw_vl(Cpu *cpu) {
-    uint16_t addr = cpu->X;
-    uint8_t count = mem_read8(addr);
-    addr++;
-
-    // TODO: replace with real BIOS scale register once game/BIOS code drives Draw_VL.
-    // Component bytes are DAC values, not pixels; 2x is a visible placeholder.
-    // Origin maps Vectrex (0,0) to window center (tied to 600x400 SDL window).
-    // Y is negated: Vectrex Y increases upward, SDL Y increases downward.
-    const int scale    = 2;
-    const int origin_x = 300;
-    const int origin_y = 200;
-
-    // Pass 1: walk the vector list to find the bounding box, without drawing.
-    uint16_t scan_addr = addr;
-    int x = 0, y = 0;
-    int min_x = 0, max_x = 0, min_y = 0, max_y = 0;
-    for (uint16_t i = 0; i <= count; i++) {
-        int8_t dy = (int8_t)mem_read8(scan_addr);
-        int8_t dx = (int8_t)mem_read8(scan_addr + 1);
-        scan_addr += 2;
-
-        x += dx * scale;
-        y -= dy * scale;
-        if (x < min_x) min_x = x;
-        if (x > max_x) max_x = x;
-        if (y < min_y) min_y = y;
-        if (y > max_y) max_y = y;
-    }
-
-    int center_x = (min_x + max_x) / 2;
-    int center_y = (min_y + max_y) / 2;
-    int shift_x = origin_x - center_x;
-    int shift_y = origin_y - center_y;
-
-    // Pass 2: redraw, offsetting every point so the bounding-box center
-    // lands on (origin_x, origin_y) instead of the path's start vertex.
-    int pen_x = shift_x, pen_y = shift_y;
-    for (uint16_t i = 0; i <= count; i++) {
-        int8_t dy = (int8_t)mem_read8(addr);
-        int8_t dx = (int8_t)mem_read8(addr + 1);
-        addr += 2;
-
-        int new_x = pen_x + dx * scale;
-        int new_y = pen_y - dy * scale;
-        display_draw_line(pen_x, pen_y, new_x, new_y);
-        pen_x = new_x;
-        pen_y = new_y;
-    }
-}
-
 // Wait_Recal: real hardware waits for the beam recalibration/frame timing
 // window. Not modeled yet -- but real Wait_Recal's real bytes (confirmed via
 // disassembly at $F192, with HLE disabled) open with
@@ -662,15 +607,20 @@ void cpu_set_hle_enabled(int enabled) {
 
 // Intercepts known BIOS entry addresses before opcode fetch. Runs the native
 // handler, then pops the return address off S (equivalent to RTS).
+//
+// Draw_VL ($F3DD) is deliberately NOT intercepted here anymore: real
+// hardware draws entirely through VIA writes (ORA/ORB/shift register/T1C-H,
+// now modeled in via.c's beam integrator), and Draw_Pat_VL -- the routine
+// actually reachable and exercised during boot -- already produces visible
+// output that way without ever going through Draw_VL's real bytes. Faking
+// Draw_VL's *result* here would just intercept and discard whatever real
+// VIA writes its actual bytes would otherwise perform if PC ever reaches it.
 static int cpu_try_hle(Cpu *cpu) {
     if (!hle_enabled) {
         return 0;
     }
 
     switch (cpu->PC) {
-        case HLE_DRAW_VL:
-            hle_draw_vl(cpu);
-            break;
         case HLE_WAIT_RECAL:
             hle_wait_recal(cpu);
             break;
