@@ -5,7 +5,7 @@
 #define CART_ROM_END     0x7FFF
 
 #define RAM_START        0xC000
-#define RAM_END          0xC7FF
+#define RAM_END          0xCBFF
 
 
 // AY-3-8912 sound chip
