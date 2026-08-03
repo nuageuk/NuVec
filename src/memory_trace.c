@@ -14,17 +14,19 @@ uint8_t cart_rom[CART_ROM_SIZE];
 
 int mem_trace_enabled = 0;
 uint16_t mem_trace_pc = 0;
+long mem_trace_step = 0;
 
 static void log_access(const char *op, uint16_t address, uint8_t value) {
     if (!mem_trace_enabled) {
         return;
     }
-    if ((address >= VIA_START && address <= VIA_END) ||
-        address == AY_ADDR_LATCH || address == AY_DATA ||
-        (address >= CART_ROM_START && address <= CART_ROM_END) ||
-        address == 0xC823 || address == 0xC824 || address == 0xC825 || address == 0xC826 ||
-        address == 0xC856) {
-        printf("  PC=$%04X  %s $%04X = $%02X\n", mem_trace_pc, op, address, value);
+    // Narrowed to just $C839 (candidate note-header pointer source) and
+    // $C856 (Vec_Music_Flag, to mark the Init_Music_x restarts) for the
+    // $C839-provenance investigation -- the broader VIA/AY/cart watch list
+    // used by earlier sessions would drown this in noise across 30M steps.
+    if (address == 0xC839 || address == 0xC83A || address == 0xC856 ||
+        (address >= CART_ROM_START && address <= CART_ROM_END)) {
+        printf("step=%ld  PC=$%04X  %s $%04X = $%02X\n", mem_trace_step, mem_trace_pc, op, address, value);
     }
 }
 

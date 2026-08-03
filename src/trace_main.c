@@ -68,7 +68,12 @@ int main(int argc, char *argv[]) {
         ring[step % RING] = pc;
 
         mem_trace_pc = pc;
+        mem_trace_step = step;
         mem_trace_enabled = (trace_count > 0 && step >= trace_start && step < trace_start + trace_count);
+
+        if (pc == 0xF69E && getenv("WATCH_U")) {
+            fprintf(stderr, "step=%d  PC=$F69E  U=$%04X (about to STU -> $C853)\n", step, cpu.U);
+        }
 
         if (has_cart && pc <= CART_ROM_END) {
             cart_region_hits++;

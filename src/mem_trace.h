@@ -9,5 +9,6 @@
 // much VIA/AY access logging gets printed.
 extern int mem_trace_enabled;
 extern uint16_t mem_trace_pc;
+extern long mem_trace_step;
 
 #endif // MEM_TRACE_H
