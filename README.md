@@ -6,33 +6,26 @@
 ███    ███ ▀██▀█   ▀████▀   ▀███████ ▀███████   
 ```                                     
                                                 
-A from-scratch Vectrex emulator — 6809 CPU core + vector display, written for the fun of getting close to the metal.
+A from-scratch Vectrex emulator — 6809 CPU core + real vector display via a cycle-accurate VIA/analog integrator model, written for the fun of getting close to the metal.
 
-> **This project is unfinished and under active, early development.** Large parts of the system are missing or incomplete (see [Status](#status) below). It is not yet playable end-to-end. Expect bugs, missing opcodes, crashes, and breaking changes on every commit. Use it to poke around or follow along, not to actually play games yet.
+> **This project is under active, early development.** Core emulation — CPU, VIA, and vector/text rendering — is working and has run real commercial cartridges to completion. Missing pieces are sound, controls, and a proper loading UI (see [Status](#status)). Expect bugs and breaking changes on every commit.
 
 ## What is this?
 
-NuVec aims to be a standalone Vectrex emulator: point it at a BIOS image and a ROM, and it boots into the game with mapped controls. Long-term, the plan is to also support building original Vectrex homebrew games on top of it.
+NuVec is a standalone Vectrex emulator: point it at a BIOS image and a ROM, and it boots and renders the real game. Long-term, the plan is to also support building original Vectrex homebrew games on top of it.
 
 ## Status
 
 **Working:**
-- Memory map: RAM + BIOS ROM buffers, cartridge ROM loading from file
-- `mem_read8` / `mem_write8` memory routing
-- 6809 CPU: register struct, reset vector loading, fetch-decode-execute loop
-- Load/store instruction family
-- Arithmetic instructions with condition code flags
-- Conditional and unconditional branches
-- `JSR` / `RTS` with hardware stack
-- Core indexed addressing modes (shared resolution helper)
-- Per-instruction cycle counting
-- Minimal SDL2 window rendering (currently a hardcoded shape, not real game output)
-- CPU execution bridged to display via a RAM-based display list
-- `Wait_Recal` wired to `$F192`, based on BIOS byte-pattern investigation
+- Full memory map: RAM + BIOS ROM, cartridge ROM loading from file
+- 6809 CPU: complete opcode coverage as exercised by real BIOS + cartridge execution (fetch-decode-execute, all addressing modes including per-submode indexed-addressing cycle timing, arithmetic with condition codes, branches, `JSR`/`RTS`, interrupt delivery via `CWAI`/IRQ)
+- Real 6522 VIA emulation
+- Real per-cycle analog beam/integrator model (DAC, sample-and-holds, mux, ramp/blank signals) — not HLE; this is what makes both vector graphics and text render correctly, timed the same way real hardware does it
+- Frame timing throttled to match real Vectrex speed (~1.5MHz CPU, ~50Hz refresh)
+- Confirmed working end-to-end: the real Vectrex BIOS boot splash renders correctly ("VECTREX / GCE / ENTERTAINING NEW IDEAS", cleanly aligned text)
+- Two commercial cartridges tested and running to completion: **Space Wars (1982)** and **Star Hawk (1982)** — real gameplay visuals, moving ships, starfields, 3D-perspective wireframe scenes
 
 **Not yet implemented:**
-- Full 6809 instruction set (opcode coverage still growing)
-- Real vector display rendering driven by actual game ROM output
 - AY-3-8912 sound emulation
 - Controller/input handling
 - BIOS/ROM file picker or drag-and-drop loading UI
@@ -40,7 +33,13 @@ NuVec aims to be a standalone Vectrex emulator: point it at a BIOS image and a R
 
 ## Usage
 
-There isn't a usable build yet. This section will be filled in once boot-to-game works end to end. For now, the code is here to read, run, and follow the CPU/display logic as it's built.
+Build with CMake + MinGW-w64 + SDL2, then run with a cartridge path as an argument:
+
+\`\`\`
+NuVec.exe path\to\game.vec
+\`\`\`
+
+No file picker yet — command-line argument only for now.
 
 ## Why Vectrex?
 
@@ -48,8 +47,9 @@ Picked over other obscure targets (like the Pokémon Mini) for being close-to-me
 
 ## Roadmap
 
-- [ ] Finish 6809 opcode coverage
-- [ ] Real display list → vector rendering (replace hardcoded shape)
+- [x] 6809 opcode coverage
+- [x] Real analog integrator → vector rendering (replaced the old hardcoded shape)
+- [x] Cycle-accurate timing (fixes both speed and text rendering)
 - [ ] Controller input
 - [ ] Sound (AY-3-8912)
 - [ ] ROM/BIOS loading UI
