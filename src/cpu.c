@@ -1,12 +1,14 @@
 #include "cpu.h"
 #include "display.h"
 #include "memory.h"
+#include "via.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
 void cpu_reset(Cpu *cpu) {
     memset(cpu, 0, sizeof(*cpu));
+    via_reset();
 
     cpu->DP = 0x00;
     cpu->CC = CC_I | CC_F; // IRQ/FIRQ masked on reset
@@ -24,6 +26,11 @@ static void set_nz8(Cpu *cpu, uint8_t value) {
 static void set_nz16(Cpu *cpu, uint16_t value) {
     if (value & 0x8000) cpu->CC |= CC_N; else cpu->CC &= ~CC_N;
     if (value == 0)     cpu->CC |= CC_Z; else cpu->CC &= ~CC_Z;
+}
+
+// LEAX/LEAY affect only Z (per the MC6809 datasheet); N/V/C are left alone.
+static void set_z16(Cpu *cpu, uint16_t value) {
+    if (value == 0) cpu->CC |= CC_Z; else cpu->CC &= ~CC_Z;
 }
 
 static uint16_t *cpu_index_register(Cpu *cpu, uint8_t rr) {
@@ -197,6 +204,14 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
             *out_addr = cpu_read_indirect((uint16_t)(cpu->PC + offset));
             return 1;
         }
+        case 0x1F: { // [n16] extended indirect -- RR field unused/don't-care
+            uint8_t hi = mem_read8(cpu->PC);
+            uint8_t lo = mem_read8(cpu->PC + 1);
+            cpu->PC += 2;
+            uint16_t addr = ((uint16_t)hi << 8) | lo;
+            *out_addr = cpu_read_indirect(addr);
+            return 1;
+        }
 
         default:
             printf("unimplemented indexed postbyte 0x%02X at PC=0x%04X\n", postbyte, (uint16_t)(cpu->PC - 1));
@@ -237,6 +252,27 @@ static void cpu_add8(Cpu *cpu, uint8_t *reg, uint8_t operand) {
     *reg = result;
 
     set_nz8(cpu, result);
+
+    // V: operands share a sign and the result's sign differs from it.
+    if ((~(a ^ operand) & (a ^ result)) & 0x80) cpu->CC |= CC_V; else cpu->CC &= ~CC_V;
+
+    // C: unsigned carry out of bit 7.
+    if (wide & 0x100) cpu->CC |= CC_C; else cpu->CC &= ~CC_C;
+}
+
+// ADC variant of cpu_add8: adds the carry flag in as well, and (unlike
+// cpu_add8) sets H -- the half-carry out of bit 3 -- since ADC's defined
+// purpose is feeding into a following DAA, which needs H to be accurate.
+static void cpu_adc8(Cpu *cpu, uint8_t *reg, uint8_t operand) {
+    uint8_t a = *reg;
+    uint8_t carry_in = (cpu->CC & CC_C) ? 1 : 0;
+    uint16_t wide = (uint16_t)a + (uint16_t)operand + carry_in;
+    uint8_t result = (uint8_t)wide;
+    *reg = result;
+
+    set_nz8(cpu, result);
+
+    if (((a & 0x0F) + (operand & 0x0F) + carry_in) & 0x10) cpu->CC |= CC_H; else cpu->CC &= ~CC_H;
 
     // V: operands share a sign and the result's sign differs from it.
     if ((~(a ^ operand) & (a ^ result)) & 0x80) cpu->CC |= CC_V; else cpu->CC &= ~CC_V;
@@ -598,10 +634,20 @@ static void hle_draw_vl(Cpu *cpu) {
 }
 
 // Wait_Recal: real hardware waits for the beam recalibration/frame timing
-// window. Not modeled yet -- structured as its own handler so it's a single
-// place to add real frame-timing behavior later, but for now it's a no-op.
+// window. Not modeled yet -- but real Wait_Recal's real bytes (confirmed via
+// disassembly at $F192, with HLE disabled) open with
+// LDX $C825 / LEAX 1,X / STX $C825 -- incrementing Vec_Loop_Count, a 16-bit
+// OS RAM tick counter -- before BSR DP_to_D0 (LDA #$D0; TFR A,DP). The
+// power-on loop's exit test at $F06A (CMPA #$01; BLS $F01C) reads this same
+// counter, so skipping the increment left it permanently stuck at its
+// cold-boot value and the loop never advancing past its first iteration.
 static void hle_wait_recal(Cpu *cpu) {
-    (void)cpu;
+    uint16_t loop_count = ((uint16_t)mem_read8(0xC825) << 8) | mem_read8(0xC826);
+    loop_count++;
+    mem_write8(0xC825, (uint8_t)(loop_count >> 8));
+    mem_write8(0xC826, (uint8_t)(loop_count & 0xFF));
+
+    cpu->DP = 0xD0;
 }
 
 // Lets debug/diagnostic code (see main.c's BIOS tracer) temporarily disable
@@ -658,6 +704,7 @@ static const uint8_t opcode_cycles[256] = {
     [OP_STD_DIR] = 5, [OP_STD_EXT] = 6, [OP_STD_IDX] = 5,
 
     [OP_ADDA_IMM] = 2, [OP_ADDA_DIR] = 4, [OP_ADDA_EXT] = 5, [OP_ADDA_IDX] = 4,
+    [OP_ADCA_IMM] = 2,
     [OP_ADDB_IMM] = 2, [OP_ADDB_DIR] = 4, [OP_ADDB_EXT] = 5, [OP_ADDB_IDX] = 4,
     [OP_SUBA_IMM] = 2, [OP_SUBA_DIR] = 4, [OP_SUBA_EXT] = 5, [OP_SUBA_IDX] = 4,
     [OP_SUBB_IMM] = 2, [OP_SUBB_DIR] = 4, [OP_SUBB_EXT] = 5, [OP_SUBB_IDX] = 4,
@@ -712,6 +759,8 @@ static const uint8_t opcode_cycles[256] = {
     [OP_JMP_DIR] = 3, [OP_JMP_EXT] = 4, [OP_JMP_IDX] = 3,
 
     [OP_JSR_DIR] = 7, [OP_JSR_EXT] = 8, [OP_RTS] = 5,
+    [OP_NOP] = 2,
+    [OP_LEAX] = 4, [OP_LEAY] = 4, [OP_LEAS] = 4, [OP_LEAU] = 4,
 
     // PSHS/PULS cost (5 + 1 per byte transferred) depends on the postbyte's
     // register mask, so it's charged inline in their cases instead of here.
@@ -724,6 +773,9 @@ static const uint8_t opcode_cycles[256] = {
 static const uint8_t page2_cycles[256] = {
     [OP2_LDS_IMM] = 4, [OP2_LDS_DIR] = 6, [OP2_LDS_EXT] = 7,
     [OP2_STS_DIR] = 6, [OP2_STS_EXT] = 7,
+
+    [OP2_LDY_IMM] = 4, [OP2_LDY_DIR] = 6, [OP2_LDY_EXT] = 7, [OP2_LDY_IDX] = 6,
+    [OP2_STY_DIR] = 6, [OP2_STY_EXT] = 7, [OP2_STY_IDX] = 6,
 
     [OP2_CMPD_IMM] = 5, [OP2_CMPD_DIR] = 7, [OP2_CMPD_EXT] = 8, [OP2_CMPD_IDX] = 7,
     [OP2_CMPY_IMM] = 5, [OP2_CMPY_DIR] = 7, [OP2_CMPY_EXT] = 8, [OP2_CMPY_IDX] = 7,
@@ -775,6 +827,42 @@ static int cpu_step_page2(Cpu *cpu, uint16_t prefix_pc) {
             if (!cpu_resolve_address(cpu, opcode2 == OP2_STS_DIR ? ADDR_DIRECT : ADDR_EXTENDED, &addr)) return 0;
             mem_write8(addr, (uint8_t)(cpu->S >> 8));
             mem_write8(addr + 1, (uint8_t)(cpu->S & 0xFF));
+            return 1;
+        }
+
+        case OP2_LDY_IMM: {
+            uint8_t hi = mem_read8(cpu->PC);
+            uint8_t lo = mem_read8(cpu->PC + 1);
+            cpu->PC += 2;
+            uint16_t value = ((uint16_t)hi << 8) | lo;
+
+            cpu->Y = value;
+            set_nz16(cpu, value);
+            return 1;
+        }
+        case OP2_LDY_DIR:
+        case OP2_LDY_EXT:
+        case OP2_LDY_IDX: {
+            AddrMode mode = opcode2 == OP2_LDY_DIR ? ADDR_DIRECT : opcode2 == OP2_LDY_EXT ? ADDR_EXTENDED : ADDR_INDEXED;
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, mode, &addr)) return 0;
+            uint8_t hi = mem_read8(addr);
+            uint8_t lo = mem_read8(addr + 1);
+            uint16_t value = ((uint16_t)hi << 8) | lo;
+
+            cpu->Y = value;
+            set_nz16(cpu, value);
+            return 1;
+        }
+
+        case OP2_STY_DIR:
+        case OP2_STY_EXT:
+        case OP2_STY_IDX: {
+            AddrMode mode = opcode2 == OP2_STY_DIR ? ADDR_DIRECT : opcode2 == OP2_STY_EXT ? ADDR_EXTENDED : ADDR_INDEXED;
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, mode, &addr)) return 0;
+            mem_write8(addr, (uint8_t)(cpu->Y >> 8));
+            mem_write8(addr + 1, (uint8_t)(cpu->Y & 0xFF));
             return 1;
         }
 
@@ -925,7 +1013,13 @@ static int cpu_step_page3(Cpu *cpu, uint16_t prefix_pc) {
     }
 }
 
-int cpu_step(Cpu *cpu) {
+// Does the actual opcode fetch/dispatch/execute. Split out from cpu_step()
+// so cpu_step() can measure exactly how many cycles this call added
+// (cpu->cycles is incremented from several different places below --
+// upfront table lookups, PSHS/PULS's dynamic byte count, long conditional
+// branches' taken/not-taken cost -- so a before/after delta is simpler and
+// more honest than threading a cycle count out through every return path).
+static int cpu_step_dispatch(Cpu *cpu) {
     // No cycle cost is charged for HLE -- these replace routines of variable
     // real timing, not something honestly chargeable from the datasheet.
     if (cpu_try_hle(cpu)) {
@@ -1122,6 +1216,12 @@ int cpu_step(Cpu *cpu) {
             uint8_t operand = mem_read8(cpu->PC);
             cpu->PC++;
             cpu_add8(cpu, &cpu->A, operand);
+            return 1;
+        }
+        case OP_ADCA_IMM: {
+            uint8_t operand = mem_read8(cpu->PC);
+            cpu->PC++;
+            cpu_adc8(cpu, &cpu->A, operand);
             return 1;
         }
         case OP_ADDA_DIR:
@@ -1682,6 +1782,36 @@ int cpu_step(Cpu *cpu) {
             cpu->PC = cpu_pop16(cpu);
             return 1;
 
+        case OP_NOP:
+            return 1;
+
+        case OP_LEAX: {
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, ADDR_INDEXED, &addr)) return 0;
+            cpu->X = addr;
+            set_z16(cpu, addr);
+            return 1;
+        }
+        case OP_LEAY: {
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, ADDR_INDEXED, &addr)) return 0;
+            cpu->Y = addr;
+            set_z16(cpu, addr);
+            return 1;
+        }
+        case OP_LEAS: {
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, ADDR_INDEXED, &addr)) return 0;
+            cpu->S = addr;
+            return 1;
+        }
+        case OP_LEAU: {
+            uint16_t addr;
+            if (!cpu_resolve_address(cpu, ADDR_INDEXED, &addr)) return 0;
+            cpu->U = addr;
+            return 1;
+        }
+
         case OP_TFR: {
             uint8_t postbyte = mem_read8(cpu->PC);
             cpu->PC++;
@@ -1773,6 +1903,13 @@ int cpu_step(Cpu *cpu) {
             printf("unimplemented opcode 0x%02X at PC=0x%04X\n", opcode, opcode_pc);
             return 0;
     }
+}
+
+int cpu_step(Cpu *cpu) {
+    uint64_t cycles_before = cpu->cycles;
+    int ok = cpu_step_dispatch(cpu);
+    via_tick((uint32_t)(cpu->cycles - cycles_before));
+    return ok;
 }
 
 void cpu_print_state(const Cpu *cpu) {

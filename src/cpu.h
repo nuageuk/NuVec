@@ -65,6 +65,8 @@
 #define OP_ADDA_EXT 0xBB
 #define OP_ADDA_IDX 0xAB
 
+#define OP_ADCA_IMM 0x89
+
 #define OP_ADDB_IMM 0xCB
 #define OP_ADDB_DIR 0xDB
 #define OP_ADDB_EXT 0xFB
@@ -236,6 +238,7 @@
 #define OP_JSR_DIR 0x9D
 #define OP_JSR_EXT 0xBD
 #define OP_RTS 0x39
+#define OP_NOP 0x12
 
 #define OP_BSR 0x8D
 #define OP_LBRA 0x16
@@ -244,6 +247,14 @@
 #define OP_JMP_DIR 0x0E
 #define OP_JMP_EXT 0x7E
 #define OP_JMP_IDX 0x6E
+
+// LEAX/LEAY/LEAS/LEAU: indexed-only (no direct/extended/immediate form) --
+// compute the indexed effective address and load it into the register
+// without dereferencing memory at that address.
+#define OP_LEAX 0x30
+#define OP_LEAY 0x31
+#define OP_LEAS 0x32
+#define OP_LEAU 0x33
 
 #define OP_EXG 0x1E
 #define OP_TFR 0x1F
@@ -262,6 +273,17 @@
 #define OP2_LDS_EXT 0xFE
 #define OP2_STS_DIR 0xDF
 #define OP2_STS_EXT 0xFF
+
+// LDY/STY reuse LDX/STX's own page-1 secondary bytes (X and Y are
+// symmetric index registers) -- unlike LDS/STS above, which reuse LDU/STU's.
+#define OP2_LDY_IMM 0x8E
+#define OP2_LDY_DIR 0x9E
+#define OP2_LDY_EXT 0xBE
+#define OP2_LDY_IDX 0xAE
+
+#define OP2_STY_DIR 0x9F
+#define OP2_STY_EXT 0xBF
+#define OP2_STY_IDX 0xAF
 
 // Long conditional branches: same secondary byte as the matching page-1
 // short branch above (e.g. OP2_LBCC == OP_BCC), just reached via the 0x10

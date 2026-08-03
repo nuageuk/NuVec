@@ -151,15 +151,22 @@ static void run_cpu_tests(Cpu *cpu) {
 }
 
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
-
     printf("NuVec starting\n");
     printf("BIOS ROM starts at 0x%04X\n", BIOS_ROM_START);
 
     if (!mem_load_rom("roms/Vectrex BIOS (1982).vec", bios_rom, sizeof(bios_rom))) {
         fprintf(stderr, "Failed to load BIOS ROM\n");
         return 1;
+    }
+
+    if (argc > 1) {
+        if (!mem_load_rom(argv[1], cart_rom, sizeof(cart_rom))) {
+            fprintf(stderr, "Failed to load cartridge ROM from '%s'\n", argv[1]);
+            return 1;
+        }
+        printf("Cartridge ROM loaded from '%s'\n", argv[1]);
+    } else {
+        printf("No cartridge ROM provided; booting BIOS only\n");
     }
 
     mem_write8(RAM_START, 0x42);
@@ -180,10 +187,13 @@ int main(int argc, char *argv[]) {
     // HLE Draw_VL: JSR $F3DD with X pointing at a small vector list, then
     // verify PC resumes exactly where a real RTS would land and S stays
     // balanced -- same verification shape as the earlier hand-rolled JSR/RTS
-    // test, just landing on an HLE'd BIOS routine instead of 6809 code.
-    // vlist_addr/caller_addr stay in scope for the render loop below, which
-    // re-invokes this JSR every frame the way a real Vectrex game's own loop
-    // would call Draw_VL once per frame.
+    // test, just landing on an HLE'd BIOS routine instead of 6809 code. This
+    // is a one-time sanity check of the HLE mechanism itself, done here with
+    // a synthetic forced JSR; the render loop below no longer drives Draw_VL
+    // this way -- it free-runs real BIOS code instead, which triggers the
+    // same HLE interception on its own whenever it executes a genuine
+    // JSR $F3DD. The vector list this test writes to vlist_addr is left in
+    // RAM afterward but nothing forces the CPU to visit it anymore.
     const uint16_t vlist_addr = 0xC400;
     const uint16_t caller_addr = RAM_START + 0x320; // 0xC320
     const uint16_t after_jsr = caller_addr + 3;
@@ -221,6 +231,20 @@ int main(int argc, char *argv[]) {
         cpu_print_state(&cpu);
     }
 
+    // Fresh reset before the render loop: run_cpu_tests() and the one-time
+    // HLE sanity check above both reused this Cpu instance as scratch space
+    // for unrelated register-level tests, so PC/registers are left in
+    // whatever state those tests wanted, not the real reset vector. The
+    // render loop below free-runs actual BIOS code, so it needs to start
+    // exactly where real hardware would.
+    cpu_reset(&cpu);
+
+    // Placeholder instruction budget, not cycle-paced yet (real hardware is
+    // ~1.5MHz over a ~50Hz frame, i.e. closer to 30000 *cycles*, not
+    // instructions -- this just needs to be "many" for now per-frame).
+    const int steps_per_frame = 10000;
+    int halted = 0;
+
     int running = 1;
     while (running) {
         SDL_Event event;
@@ -232,12 +256,19 @@ int main(int argc, char *argv[]) {
 
         display_clear();
 
-        // Redraw the HLE'd shape every frame too, the way a real Vectrex
-        // game calls Draw_VL once per frame from its own game loop.
-        cpu.X = vlist_addr;
-        cpu.PC = caller_addr;
-        cpu_step(&cpu); // JSR extended -> $F3DD
-        cpu_step(&cpu); // HLE Draw_VL + simulated RTS
+        // Free-run the real BIOS from wherever it currently is. Draw_VL (and
+        // any other HLE'd routine) fires via cpu_try_hle()'s PC-match inside
+        // cpu_step() whenever BIOS code itself executes a genuine JSR to it
+        // -- nothing here forces that call anymore.
+        if (!halted) {
+            for (int i = 0; i < steps_per_frame; i++) {
+                if (!cpu_step(&cpu)) {
+                    printf("CPU halted: unimplemented opcode at PC=0x%04X\n", cpu.PC);
+                    halted = 1;
+                    break;
+                }
+            }
+        }
 
         display_present();
     }
