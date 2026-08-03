@@ -14,6 +14,7 @@
 #define CC_E 0x80 // Entire state (stacked on interrupt)
 
 #define RESET_VECTOR 0xFFFE
+#define IRQ_VECTOR   0xFFF8
 
 #define OP_LDA_IMM 0x86
 #define OP_LDA_DIR 0x96
@@ -238,6 +239,7 @@
 #define OP_JSR_DIR 0x9D
 #define OP_JSR_EXT 0xBD
 #define OP_RTS 0x39
+#define OP_RTI 0x3B
 #define OP_NOP 0x12
 
 #define OP_BSR 0x8D

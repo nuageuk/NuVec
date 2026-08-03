@@ -112,6 +112,10 @@ void via_tick(uint32_t cycles) {
     via_advance_t2(cycles);
 }
 
+int via_irq_pending(void) {
+    return (via.ifr & via.ier & 0x7F) != 0;
+}
+
 // Mux select is Port B bits 2-1: 00=Y integrator, 01=X integrator,
 // 10=Z (brightness) channel, 11=sound (AY-3-8912 handshake, not a beam axis).
 typedef enum { MUX_Y = 0, MUX_X = 1, MUX_Z = 2, MUX_SOUND = 3 } MuxAxis;
@@ -177,12 +181,23 @@ static void via_check_zero_ref(uint8_t pcr_value) {
     }
 }
 
+// Port A reads: bits DDRA marks as outputs read back the ORA latch (normal
+// 6522 behavior, needed for the AY-3-8912 bus write-then-readback verify
+// pattern BIOS code uses). Bits marked as inputs (joystick/button lines,
+// read through the mux/comparator) used to just echo the latch too, which
+// meant software could never observe anything it hadn't itself written --
+// no real button press could ever be seen. With no live controller, every
+// input bit now reads idle/released (1, active-low convention) instead.
+static uint8_t via_read_ora(void) {
+    return (uint8_t)((via.ora & via.ddra) | (uint8_t)(~via.ddra));
+}
+
 uint8_t via_read8(uint16_t address) {
     uint8_t reg = (uint8_t)((address - VIA_START) & 0x0F);
 
     switch (reg) {
         case 0x0: return via.orb;
-        case 0x1: return via.ora;
+        case 0x1: return via_read_ora();
         case 0x2: return via.ddrb;
         case 0x3: return via.ddra;
 
@@ -217,7 +232,7 @@ uint8_t via_read8(uint16_t address) {
             return (uint8_t)(via.ier | 0x80);
 
         default: // 0xF: ORA/IRA without handshake -- same store as ORA
-            return via.ora;
+            return via_read_ora();
     }
 }
 

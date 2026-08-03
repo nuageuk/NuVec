@@ -24,4 +24,9 @@ void via_write8(uint16_t address, uint8_t value);
 // instruction's cycle cost.
 void via_tick(uint32_t cycles);
 
+// True whenever an enabled interrupt condition is pending (IFR & IER on any
+// of the low 7 bits) -- the real 6522's IRQ output line. cpu_step() polls
+// this once per instruction to decide whether to service a 6809 IRQ.
+int via_irq_pending(void);
+
 #endif // VIA_H

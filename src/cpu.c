@@ -1732,6 +1732,28 @@ static int cpu_step_dispatch(Cpu *cpu) {
             cpu->PC = cpu_pop16(cpu);
             return 1;
 
+        case OP_RTI: {
+            cpu->CC = cpu_pop8(cpu);
+            if (cpu->CC & CC_E) {
+                // Full state was stacked (a real IRQ, or SWI/NMI): unwind
+                // it all, same order PULS would with an "everything" mask.
+                cpu->A  = cpu_pop8(cpu);
+                cpu->B  = cpu_pop8(cpu);
+                cpu->DP = cpu_pop8(cpu);
+                cpu->X  = cpu_pop16(cpu);
+                cpu->Y  = cpu_pop16(cpu);
+                cpu->U  = cpu_pop16(cpu);
+                cpu->PC = cpu_pop16(cpu);
+                cpu->cycles += 15;
+            } else {
+                // FIRQ's shallow stack: only PC (and the CC already popped
+                // above) were pushed.
+                cpu->PC = cpu_pop16(cpu);
+                cpu->cycles += 6;
+            }
+            return 1;
+        }
+
         case OP_NOP:
             return 1;
 
@@ -1855,8 +1877,40 @@ static int cpu_step_dispatch(Cpu *cpu) {
     }
 }
 
+// Services a pending 6809 IRQ: pushes the full machine state (PC, U, Y, X,
+// DP, B, A, CC, in that order -- the same order PSHS uses, so RTI's pop
+// order below mirrors PULS), sets CC_E to mark this as a full-state stack
+// (distinguishing it from FIRQ's shallow PC+CC-only stack), masks further
+// IRQs via CC_I, and jumps to the vector at $FFF8/$FFF9.
+static void cpu_handle_irq(Cpu *cpu) {
+    cpu->CC |= CC_E;
+    cpu_push16(cpu, cpu->PC);
+    cpu_push16(cpu, cpu->U);
+    cpu_push16(cpu, cpu->Y);
+    cpu_push16(cpu, cpu->X);
+    cpu_push8(cpu, cpu->DP);
+    cpu_push8(cpu, cpu->B);
+    cpu_push8(cpu, cpu->A);
+    cpu_push8(cpu, cpu->CC);
+
+    cpu->CC |= CC_I;
+
+    uint8_t hi = mem_read8(IRQ_VECTOR);
+    uint8_t lo = mem_read8(IRQ_VECTOR + 1);
+    cpu->PC = (uint16_t)(((uint16_t)hi << 8) | lo);
+
+    cpu->cycles += 19; // real 6809 full-state IRQ entry cost
+}
+
 int cpu_step(Cpu *cpu) {
     uint64_t cycles_before = cpu->cycles;
+
+    if (via_irq_pending() && !(cpu->CC & CC_I)) {
+        cpu_handle_irq(cpu);
+        via_tick((uint32_t)(cpu->cycles - cycles_before));
+        return 1;
+    }
+
     int ok = cpu_step_dispatch(cpu);
     via_tick((uint32_t)(cpu->cycles - cycles_before));
     return ok;
