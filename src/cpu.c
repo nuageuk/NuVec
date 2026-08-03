@@ -710,6 +710,10 @@ static const uint8_t opcode_cycles[256] = {
 
     [OP_JSR_DIR] = 7, [OP_JSR_EXT] = 8, [OP_RTS] = 5,
     [OP_NOP] = 2,
+    [OP_ABX] = 3,
+    [OP_MUL] = 11,
+    [OP_CWAI] = 20,
+    [OP_ANDCC] = 3,
     [OP_LEAX] = 4, [OP_LEAY] = 4, [OP_LEAS] = 4, [OP_LEAU] = 4,
 
     // PSHS/PULS cost (5 + 1 per byte transferred) depends on the postbyte's
@@ -1754,8 +1758,56 @@ static int cpu_step_dispatch(Cpu *cpu) {
             return 1;
         }
 
+        case OP_CWAI: {
+            uint8_t mask = mem_read8(cpu->PC);
+            cpu->PC++;
+
+            cpu->CC &= mask;
+            cpu->CC |= CC_E; // full-state stack, same as a real IRQ entry
+
+            cpu_push16(cpu, cpu->PC);
+            cpu_push16(cpu, cpu->U);
+            cpu_push16(cpu, cpu->Y);
+            cpu_push16(cpu, cpu->X);
+            cpu_push8(cpu, cpu->DP);
+            cpu_push8(cpu, cpu->B);
+            cpu_push8(cpu, cpu->A);
+            cpu_push8(cpu, cpu->CC);
+
+            // Suspends dispatch until cpu_step() sees an unmasked interrupt
+            // pending -- see cpu_wake_from_cwai() below. Machine state is
+            // already fully stacked above, so waking up must NOT push again.
+            cpu->waiting_for_irq = 1;
+            return 1;
+        }
+
+        case OP_ANDCC: {
+            uint8_t mask = mem_read8(cpu->PC);
+            cpu->PC++;
+            cpu->CC &= mask;
+            return 1;
+        }
+
         case OP_NOP:
             return 1;
+
+        case OP_ABX:
+            // B is unsigned here (unlike most other 8-bit-into-16-bit uses),
+            // so no sign-extension -- just zero-extend and add. No flags affected.
+            cpu->X = (uint16_t)(cpu->X + cpu->B);
+            return 1;
+
+        case OP_MUL: {
+            // Unsigned 8x8 -> 16: D = A * B. Only Z and C are affected (not
+            // N/V) -- C is set to bit 7 of the result, a real-hardware quirk
+            // BIOS/game code uses for quick rounding (ADDA #$80; MUL rounds
+            // to the nearest via the carry it leaves).
+            uint16_t result = (uint16_t)cpu->A * (uint16_t)cpu->B;
+            cpu->D = result;
+            set_z16(cpu, result);
+            if (result & 0x0080) cpu->CC |= CC_C; else cpu->CC &= ~CC_C;
+            return 1;
+        }
 
         case OP_LEAX: {
             uint16_t addr;
@@ -1902,8 +1954,43 @@ static void cpu_handle_irq(Cpu *cpu) {
     cpu->cycles += 19; // real 6809 full-state IRQ entry cost
 }
 
+// Resumes a CPU parked in CWAI's wait state once an unmasked interrupt is
+// actually pending. CWAI already stacked the entire machine state itself
+// (see its case in cpu_step_dispatch()), so unlike cpu_handle_irq() this
+// must NOT push again -- it just masks further IRQs and jumps to the
+// vector. The 7-cycle charge is a derived estimate, not a directly-verified
+// datasheet number for this specific path: real hardware's non-CWAI full
+// IRQ entry is a documented 19 cycles, of which ~12 is exactly the
+// register-pushing CWAI already paid for, leaving roughly this much for
+// the remaining sample/mask/vector-fetch work.
+static void cpu_wake_from_cwai(Cpu *cpu) {
+    cpu->CC |= CC_I;
+
+    uint8_t hi = mem_read8(IRQ_VECTOR);
+    uint8_t lo = mem_read8(IRQ_VECTOR + 1);
+    cpu->PC = (uint16_t)(((uint16_t)hi << 8) | lo);
+
+    cpu->cycles += 7;
+}
+
 int cpu_step(Cpu *cpu) {
     uint64_t cycles_before = cpu->cycles;
+
+    if (cpu->waiting_for_irq) {
+        if (via_irq_pending() && !(cpu->CC & CC_I)) {
+            cpu->waiting_for_irq = 0;
+            cpu_wake_from_cwai(cpu);
+        } else {
+            // Still waiting: the bus is idle, but real time -- and VIA
+            // state -- keeps moving, so charge a nominal single cycle
+            // purely so the via_tick() below still advances timers/the
+            // beam integrator on every call, same as real hardware sitting
+            // in the wait state.
+            cpu->cycles += 1;
+        }
+        via_tick((uint32_t)(cpu->cycles - cycles_before));
+        return 1;
+    }
 
     if (via_irq_pending() && !(cpu->CC & CC_I)) {
         cpu_handle_irq(cpu);

@@ -241,6 +241,10 @@
 #define OP_RTS 0x39
 #define OP_RTI 0x3B
 #define OP_NOP 0x12
+#define OP_ABX 0x3A
+#define OP_MUL 0x3D
+#define OP_CWAI 0x3C
+#define OP_ANDCC 0x1C
 
 #define OP_BSR 0x8D
 #define OP_LBRA 0x16
@@ -361,6 +365,12 @@ typedef struct {
     uint8_t CC; // Condition code register (packed flags)
 
     uint64_t cycles; // total 6809 clock cycles executed since reset
+
+    // Set by CWAI, cleared by cpu_step() once an unmasked interrupt is
+    // actually pending (see cpu_wake_from_cwai()). While set, dispatch is
+    // suspended -- cpu_step() just idles (still ticking the VIA) instead
+    // of fetching/executing instructions.
+    int waiting_for_irq;
 } Cpu;
 
 void cpu_reset(Cpu *cpu);
