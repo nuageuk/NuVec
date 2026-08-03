@@ -71,6 +71,12 @@ static uint16_t cpu_read_indirect(uint16_t addr) {
 // 0x1E, 0x1F) are reserved/illegal per the spec -- not just unimplemented,
 // genuinely undefined -- so they fail loudly like an unimplemented opcode
 // rather than silently resolving to the wrong address.
+// Per-submode cycle cost ON TOP OF the flat base cost opcode_cycles[] already
+// charges for every _IDX opcode (which matches only the plain ,R form).
+// Real hardware charges extra for the fancier submodes -- offset bytes to
+// fetch, auto-inc/dec bookkeeping, an extra indirection fetch, etc. Values
+// cross-checked against the MC6809 datasheet's indexed-addressing cycle
+// table (the per-submode extra-cycle column alongside Table 2 above).
 static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
     uint8_t postbyte = mem_read8(cpu->PC);
     cpu->PC++;
@@ -82,6 +88,7 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
         // 0 RR nnnnn: sign-extend the low 5 bits (bit 4 is the sign bit).
         int8_t offset = (int8_t)((postbyte & 0x1F) << 3) >> 3;
         *out_addr = (uint16_t)(*reg + offset);
+        cpu->cycles += 1;
         return 1;
     }
 
@@ -89,32 +96,39 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
         case 0x00: // ,R+
             *out_addr = *reg;
             *reg = (uint16_t)(*reg + 1);
+            cpu->cycles += 2;
             return 1;
         case 0x01: // ,R++
             *out_addr = *reg;
             *reg = (uint16_t)(*reg + 2);
+            cpu->cycles += 3;
             return 1;
         case 0x02: // ,-R
             *reg = (uint16_t)(*reg - 1);
             *out_addr = *reg;
+            cpu->cycles += 2;
             return 1;
         case 0x03: // ,--R
             *reg = (uint16_t)(*reg - 2);
             *out_addr = *reg;
+            cpu->cycles += 3;
             return 1;
-        case 0x04: // ,R
+        case 0x04: // ,R -- already exactly opcode_cycles[]'s base cost
             *out_addr = *reg;
             return 1;
         case 0x05: // B,R -- accumulator offset is sign-extended before adding
             *out_addr = (uint16_t)(*reg + (int8_t)cpu->B);
+            cpu->cycles += 1;
             return 1;
         case 0x06: // A,R
             *out_addr = (uint16_t)(*reg + (int8_t)cpu->A);
+            cpu->cycles += 1;
             return 1;
         case 0x08: { // n8,R
             int8_t offset = (int8_t)mem_read8(cpu->PC);
             cpu->PC++;
             *out_addr = (uint16_t)(*reg + offset);
+            cpu->cycles += 1;
             return 1;
         }
         case 0x09: { // n16,R
@@ -123,15 +137,18 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
             cpu->PC += 2;
             int16_t offset = (int16_t)(((uint16_t)hi << 8) | lo);
             *out_addr = (uint16_t)(*reg + offset);
+            cpu->cycles += 4;
             return 1;
         }
         case 0x0B: // D,R -- full 16-bit signed accumulator offset
             *out_addr = (uint16_t)(*reg + (int16_t)cpu->D);
+            cpu->cycles += 4;
             return 1;
         case 0x0C: { // n8,PCR -- relative to PC as left after this offset byte
             int8_t offset = (int8_t)mem_read8(cpu->PC);
             cpu->PC++;
             *out_addr = (uint16_t)(cpu->PC + offset);
+            cpu->cycles += 1;
             return 1;
         }
         case 0x0D: { // n16,PCR
@@ -140,6 +157,7 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
             cpu->PC += 2;
             int16_t offset = (int16_t)(((uint16_t)hi << 8) | lo);
             *out_addr = (uint16_t)(cpu->PC + offset);
+            cpu->cycles += 5;
             return 1;
         }
         case 0x0F: { // [n16] extended indirect -- RR field unused
@@ -148,34 +166,45 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
             cpu->PC += 2;
             uint16_t addr = ((uint16_t)hi << 8) | lo;
             *out_addr = cpu_read_indirect(addr);
+            cpu->cycles += 5;
             return 1;
         }
 
         // Indirect variants: compute the same effective address as the
-        // matching non-indirect form above, then dereference it once more.
+        // matching non-indirect form above, then dereference it once more
+        // (charged separately below -- indirection isn't just "+3" on top
+        // of the direct form's own extra, real hardware's indirect timing
+        // doesn't factor that way for every submode, so each is its own
+        // verified constant rather than direct_extra+3).
         case 0x11: { // [,R++]
             uint16_t addr = *reg;
             *reg = (uint16_t)(*reg + 2);
             *out_addr = cpu_read_indirect(addr);
+            cpu->cycles += 6;
             return 1;
         }
         case 0x13: // [,--R]
             *reg = (uint16_t)(*reg - 2);
             *out_addr = cpu_read_indirect(*reg);
+            cpu->cycles += 6;
             return 1;
         case 0x14: // [,R]
             *out_addr = cpu_read_indirect(*reg);
+            cpu->cycles += 3;
             return 1;
         case 0x15: // [B,R]
             *out_addr = cpu_read_indirect((uint16_t)(*reg + (int8_t)cpu->B));
+            cpu->cycles += 4;
             return 1;
         case 0x16: // [A,R]
             *out_addr = cpu_read_indirect((uint16_t)(*reg + (int8_t)cpu->A));
+            cpu->cycles += 4;
             return 1;
         case 0x18: { // [n8,R]
             int8_t offset = (int8_t)mem_read8(cpu->PC);
             cpu->PC++;
             *out_addr = cpu_read_indirect((uint16_t)(*reg + offset));
+            cpu->cycles += 4;
             return 1;
         }
         case 0x19: { // [n16,R]
@@ -184,15 +213,18 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
             cpu->PC += 2;
             int16_t offset = (int16_t)(((uint16_t)hi << 8) | lo);
             *out_addr = cpu_read_indirect((uint16_t)(*reg + offset));
+            cpu->cycles += 7;
             return 1;
         }
         case 0x1B: // [D,R]
             *out_addr = cpu_read_indirect((uint16_t)(*reg + (int16_t)cpu->D));
+            cpu->cycles += 7;
             return 1;
         case 0x1C: { // [n8,PCR]
             int8_t offset = (int8_t)mem_read8(cpu->PC);
             cpu->PC++;
             *out_addr = cpu_read_indirect((uint16_t)(cpu->PC + offset));
+            cpu->cycles += 4;
             return 1;
         }
         case 0x1D: { // [n16,PCR]
@@ -201,6 +233,7 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
             cpu->PC += 2;
             int16_t offset = (int16_t)(((uint16_t)hi << 8) | lo);
             *out_addr = cpu_read_indirect((uint16_t)(cpu->PC + offset));
+            cpu->cycles += 8;
             return 1;
         }
         case 0x1F: { // [n16] extended indirect -- RR field unused/don't-care
@@ -209,6 +242,7 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
             cpu->PC += 2;
             uint16_t addr = ((uint16_t)hi << 8) | lo;
             *out_addr = cpu_read_indirect(addr);
+            cpu->cycles += 5;
             return 1;
         }
 
@@ -643,10 +677,10 @@ static const uint8_t opcode_cycles[256] = {
     [OP_LDU_IMM] = 3, [OP_LDU_DIR] = 5, [OP_LDU_EXT] = 6, [OP_LDU_IDX] = 5,
     [OP_LDD_IMM] = 3, [OP_LDD_DIR] = 5, [OP_LDD_EXT] = 6, [OP_LDD_IDX] = 5,
 
-    // Indexed entries are the datasheet's base ,R cost. Real indexed timing
-    // varies with the postbyte submode (offset bytes add cycles, auto
-    // inc/dec by 2 adds one more, etc.) -- not modeled yet, consistent with
-    // cpu_resolve_indexed() itself only covering the common submodes.
+    // Indexed entries are the datasheet's base ,R cost; the submode-specific
+    // extra (offset bytes, auto-inc/dec bookkeeping, an extra indirection
+    // fetch, etc.) is charged separately by cpu_resolve_indexed() itself,
+    // which knows which submode postbyte was actually fetched.
     [OP_STA_DIR] = 4, [OP_STA_EXT] = 5, [OP_STA_IDX] = 4,
     [OP_STB_DIR] = 4, [OP_STB_EXT] = 5, [OP_STB_IDX] = 4,
     [OP_STX_DIR] = 5, [OP_STX_EXT] = 6, [OP_STX_IDX] = 5,
