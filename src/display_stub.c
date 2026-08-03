@@ -3,10 +3,10 @@
 #include <stdlib.h>
 
 // No-op display backend for the headless trace harness (trace_main.c): lets
-// via.c's beam integrator (via_integrate_and_draw) call display_draw_line()
-// without pulling in SDL or opening a window. Not part of the CMake/SDL
-// build. Tracks line-draw stats so the trace summary can report whether
-// anything is actually being rendered, even headlessly.
+// analog.c's beam integrator call display_draw_line() without pulling in SDL
+// or opening a window. Not part of the CMake/SDL build. Tracks line-draw
+// stats so the trace summary can report whether anything is actually being
+// rendered, even headlessly.
 
 static long line_count = 0;
 static int have_bounds = 0;

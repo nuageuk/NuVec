@@ -4,9 +4,9 @@
 #include <stdio.h>
 
 // Instrumented drop-in replacement for memory.c, used only by the standalone
-// trace harness (trace_main.c) to log every VIA ($D000-$D7FF) and AY-3-8912
-// ($C800/$C900) access while the cold-start loop investigation runs. Not
-// part of the CMake/SDL build -- behavior is otherwise identical to memory.c.
+// trace harness (trace_main.c) to log VIA ($D000-$D7FF) and AY-3-8912
+// ($C800/$C900) access on demand (see mem_trace_enabled). Not part of the
+// CMake/SDL build -- behavior is otherwise identical to memory.c.
 
 uint8_t ram[RAM_END - RAM_START + 1];
 uint8_t bios_rom[BIOS_ROM_END - BIOS_ROM_START + 1];
@@ -20,10 +20,9 @@ static void log_access(const char *op, uint16_t address, uint8_t value) {
     if (!mem_trace_enabled) {
         return;
     }
-    // Narrowed to just $C839 (candidate note-header pointer source) and
-    // $C856 (Vec_Music_Flag, to mark the Init_Music_x restarts) for the
-    // $C839-provenance investigation -- the broader VIA/AY/cart watch list
-    // used by earlier sessions would drown this in noise across 30M steps.
+    // Narrowed to a small fixed address set (rather than every VIA/AY/cart
+    // access) so a multi-million-step trace doesn't drown in noise. Adjust
+    // this list to whatever's currently under investigation.
     if (address == 0xC839 || address == 0xC83A || address == 0xC856 ||
         (address >= CART_ROM_START && address <= CART_ROM_END)) {
         printf("step=%ld  PC=$%04X  %s $%04X = $%02X\n", mem_trace_step, mem_trace_pc, op, address, value);

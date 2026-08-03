@@ -239,25 +239,18 @@ int main(int argc, char *argv[]) {
     // exactly where real hardware would.
     cpu_reset(&cpu);
 
-    // Real hardware runs the 6809 at ~1.5MHz and refreshes the screen at
-    // ~50Hz. Rather than a fixed instruction-count-per-loop-iteration
-    // budget (which just burns through the real ROM as fast as the host
-    // can decode instructions -- thousands of times real speed), pace
-    // execution to wall-clock time: each iteration, measure how much real
-    // time actually elapsed since the last one and run exactly that many
-    // 6809 cycles, then cap the iteration rate itself to ~50Hz by
-    // measuring how long the iteration's own work took and sleeping only
-    // the remainder -- not a blind fixed delay, which would drift as soon
-    // as any iteration's CPU-stepping or rendering took longer than usual.
+    // Real hardware runs the 6809 at ~1.5MHz and refreshes at ~50Hz. Pace
+    // execution to wall-clock time instead of a fixed instruction budget:
+    // each iteration, run however many 6809 cycles should have elapsed
+    // since the last one, then sleep off whatever's left of a 1/50s slice
+    // (measured, not a blind fixed delay -- so a slow iteration doesn't
+    // compound into drift).
     const double CYCLES_PER_SEC = 1500000.0;
     const double TARGET_HZ = 50.0;
     const double TARGET_FRAME_SEC = 1.0 / TARGET_HZ;
-    // If something stalls the loop for a while (window drag, OS scheduler
-    // hiccup, a breakpoint), the next iteration's "real elapsed time" would
-    // otherwise demand a huge burst of catch-up cycles all at once. Cap it
-    // so a stall causes a visible pause instead of the emulated CPU
-    // sprinting through several seconds' worth of instructions in one
-    // iteration.
+    // Caps the catch-up burst after a stall (window drag, OS scheduler
+    // hiccup) so it causes a visible pause instead of the CPU sprinting
+    // through several seconds' worth of instructions in one iteration.
     const double MAX_CATCHUP_SEC = TARGET_FRAME_SEC * 4.0;
 
     const uint64_t perf_freq = SDL_GetPerformanceFrequency();

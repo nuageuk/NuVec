@@ -71,6 +71,7 @@ static uint16_t cpu_read_indirect(uint16_t addr) {
 // 0x1E, 0x1F) are reserved/illegal per the spec -- not just unimplemented,
 // genuinely undefined -- so they fail loudly like an unimplemented opcode
 // rather than silently resolving to the wrong address.
+//
 // Per-submode cycle cost ON TOP OF the flat base cost opcode_cycles[] already
 // charges for every _IDX opcode (which matches only the plain ,R form).
 // Real hardware charges extra for the fancier submodes -- offset bytes to
@@ -742,13 +743,10 @@ static const uint8_t opcode_cycles[256] = {
 
     [OP_JMP_DIR] = 3, [OP_JMP_EXT] = 4, [OP_JMP_IDX] = 3,
 
-    [OP_JSR_DIR] = 7, [OP_JSR_EXT] = 8, [OP_RTS] = 5,
-    [OP_NOP] = 2,
-    [OP_ABX] = 3,
-    [OP_MUL] = 11,
+    [OP_JSR_DIR] = 7, [OP_JSR_EXT] = 8, [OP_RTS] = 5, [OP_NOP] = 2,
     [OP_CWAI] = 20,
-    [OP_ANDCC] = 3,
-    [OP_ORCC] = 3,
+    [OP_ANDCC] = 3, [OP_ORCC] = 3,
+    [OP_ABX] = 3, [OP_MUL] = 11,
     [OP_LEAX] = 4, [OP_LEAY] = 4, [OP_LEAS] = 4, [OP_LEAU] = 4,
 
     // PSHS/PULS cost (5 + 1 per byte transferred) depends on the postbyte's

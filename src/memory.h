@@ -7,7 +7,6 @@
 #define RAM_START        0xC000
 #define RAM_END          0xCBFF
 
-
 // AY-3-8912 sound chip
 #define AY_ADDR_LATCH    0xC800
 #define AY_DATA          0xC900
@@ -32,6 +31,5 @@ void mem_write8(uint16_t address, uint8_t value);
 extern uint8_t cart_rom[CART_ROM_SIZE];
 
 int mem_load_rom(const char* filepath, uint8_t* dest, size_t max_size);
-
 
 #endif // MEMORY_H

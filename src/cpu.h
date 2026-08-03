@@ -240,12 +240,13 @@
 #define OP_JSR_EXT 0xBD
 #define OP_RTS 0x39
 #define OP_RTI 0x3B
-#define OP_NOP 0x12
-#define OP_ABX 0x3A
-#define OP_MUL 0x3D
 #define OP_CWAI 0x3C
+#define OP_NOP 0x12
+
 #define OP_ANDCC 0x1C
 #define OP_ORCC 0x1A
+#define OP_ABX 0x3A
+#define OP_MUL 0x3D
 
 #define OP_BSR 0x8D
 #define OP_LBRA 0x16
@@ -336,8 +337,6 @@
 // Confirmed against the real loaded BIOS: $F192 opens LDX/LEAX/STX (a
 // memory-counter increment idiom) then BSR / LDA #imm / CMPA direct / BEQ -4
 // -- a textbook poll-until-flag-matches loop, i.e. genuinely a wait routine.
-// $F2EB, by contrast, is just ordinary sequential load/store/call code with
-// no wait-loop shape -- see dump_bios_bytes() output in main.c.
 #define HLE_WAIT_RECAL  0xF192
 
 typedef enum {
