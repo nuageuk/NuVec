@@ -15,7 +15,6 @@
 
 #define RESET_VECTOR 0xFFFE
 
-// Opcodes
 #define OP_LDA_IMM 0x86
 #define OP_LDA_DIR 0x96
 #define OP_LDA_EXT 0xB6

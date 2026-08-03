@@ -107,22 +107,11 @@ static int cpu_resolve_indexed(Cpu *cpu, uint16_t *out_addr) {
     }
 }
 
-// Resolves DIRECT/EXTENDED/INDEXED effective addresses, consuming the
-// operand byte(s) at cpu->PC and advancing PC past them. Returns 1 on
-// success with *out_addr set, or 0 if an indexed postbyte encoded a submode
-// this emulator doesn't implement (see cpu_resolve_indexed) -- DIRECT and
-// EXTENDED can never fail.
-//
-// IMMEDIATE is deliberately not a case here. DIRECT/EXTENDED/INDEXED all
-// follow the same shape: fetch operand byte(s), combine into an effective
-// address, then the caller dereferences that address separately. IMMEDIATE
-// has no dereference step at all -- the fetched bytes ARE the value -- and
-// the fetch width depends on the destination register (1 byte for A/B, 2
-// bytes for X/U), not on the addressing mode. Forcing it through this
-// function would mean either returning PC as a fake "address" (misleading,
-// since nothing is dereferenced through the normal memory-routing path
-// conceptually) or adding a width parameter that only IMMEDIATE would use.
-// Simpler to keep it inline per instruction, as before.
+// Resolves DIRECT/EXTENDED/INDEXED effective addresses, consuming operand
+// byte(s) and advancing PC. Returns 0 only for unimplemented indexed submodes.
+// IMMEDIATE is excluded: the fetched bytes are the value directly (no address
+// to compute), and the fetch width depends on the destination register, not
+// the mode -- so each instruction handles it inline.
 static int cpu_resolve_address(Cpu *cpu, AddrMode mode, uint16_t *out_addr) {
     switch (mode) {
         case ADDR_DIRECT: {
@@ -272,12 +261,8 @@ void cpu_set_hle_enabled(int enabled) {
     hle_enabled = enabled;
 }
 
-// Checked at the very top of cpu_step(), before any opcode fetch: if PC is
-// sitting on a known BIOS routine's entry address, run the native handler
-// instead of whatever 6809 bytes are actually there, then pop the return
-// address off the stack straight into PC -- the same mechanic as the RTS
-// opcode -- rather than letting the real (or, for BIOS regions we haven't
-// loaded meaningfully, garbage) bytes at that address execute.
+// Intercepts known BIOS entry addresses before opcode fetch. Runs the native
+// handler, then pops the return address off S (equivalent to RTS).
 static int cpu_try_hle(Cpu *cpu) {
     if (!hle_enabled) {
         return 0;
@@ -333,12 +318,8 @@ static const uint8_t opcode_cycles[256] = {
 };
 
 int cpu_step(Cpu *cpu) {
-    // HLE interception happens before any opcode fetch/decode: if PC is
-    // sitting on a known BIOS routine address, the native handler runs (and
-    // simulates the RTS) instead of whatever's actually at that address in
-    // the loaded ROM. No cycle cost is charged here -- these are native
-    // substitutes for routines of unknown/variable real timing, not
-    // something we can honestly cost against the datasheet table.
+    // No cycle cost is charged for HLE -- these replace routines of variable
+    // real timing, not something honestly chargeable from the datasheet.
     if (cpu_try_hle(cpu)) {
         return 1;
     }
@@ -347,10 +328,8 @@ int cpu_step(Cpu *cpu) {
     uint8_t opcode = mem_read8(cpu->PC);
     cpu->PC++;
 
-    // Cycle cost is a fixed property of the opcode byte for every
-    // instruction implemented so far (none of our branches vary cost by
-    // taken/not-taken, unlike some other 8-bit CPUs), so it's safe to
-    // account for it up front rather than threading it through every case.
+    // 6809 branches don't vary cost by taken/not-taken (unlike some other
+    // 8-bit CPUs), so it's safe to charge cycles up front for all opcodes.
     cpu->cycles += opcode_cycles[opcode];
 
     switch (opcode) {

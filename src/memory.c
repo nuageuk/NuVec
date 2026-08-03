@@ -23,7 +23,7 @@ void mem_write8(uint16_t address, uint8_t value) {
         ram[address - RAM_START] = value;
         return;
     }
-    // Writes to ROM or unmapped regions are ignored for now
+    // Writes to ROM or unmapped regions are silently ignored.
 }
 
 int mem_load_rom(const char* filepath, uint8_t* dest, size_t max_size) {

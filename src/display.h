@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-// Returns 1 on success, 0 on failure (SDL2 init/window/renderer creation).
+// Returns 1 on success, 0 on failure.
 int display_init(void);
 
 void display_clear(void);
