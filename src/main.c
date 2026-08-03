@@ -239,10 +239,31 @@ int main(int argc, char *argv[]) {
     // exactly where real hardware would.
     cpu_reset(&cpu);
 
-    // Placeholder instruction budget, not cycle-paced yet (real hardware is
-    // ~1.5MHz over a ~50Hz frame, i.e. closer to 30000 *cycles*, not
-    // instructions -- this just needs to be "many" for now per-frame).
-    const int steps_per_frame = 10000;
+    // Real hardware runs the 6809 at ~1.5MHz and refreshes the screen at
+    // ~50Hz. Rather than a fixed instruction-count-per-loop-iteration
+    // budget (which just burns through the real ROM as fast as the host
+    // can decode instructions -- thousands of times real speed), pace
+    // execution to wall-clock time: each iteration, measure how much real
+    // time actually elapsed since the last one and run exactly that many
+    // 6809 cycles, then cap the iteration rate itself to ~50Hz by
+    // measuring how long the iteration's own work took and sleeping only
+    // the remainder -- not a blind fixed delay, which would drift as soon
+    // as any iteration's CPU-stepping or rendering took longer than usual.
+    const double CYCLES_PER_SEC = 1500000.0;
+    const double TARGET_HZ = 50.0;
+    const double TARGET_FRAME_SEC = 1.0 / TARGET_HZ;
+    // If something stalls the loop for a while (window drag, OS scheduler
+    // hiccup, a breakpoint), the next iteration's "real elapsed time" would
+    // otherwise demand a huge burst of catch-up cycles all at once. Cap it
+    // so a stall causes a visible pause instead of the emulated CPU
+    // sprinting through several seconds' worth of instructions in one
+    // iteration.
+    const double MAX_CATCHUP_SEC = TARGET_FRAME_SEC * 4.0;
+
+    const uint64_t perf_freq = SDL_GetPerformanceFrequency();
+    uint64_t last_time = SDL_GetPerformanceCounter();
+    double pending_cycles = 0.0;
+
     int halted = 0;
 
     int running = 1;
@@ -256,12 +277,24 @@ int main(int argc, char *argv[]) {
 
         display_clear();
 
+        uint64_t iter_start = SDL_GetPerformanceCounter();
+        double elapsed_sec = (double)(iter_start - last_time) / (double)perf_freq;
+        last_time = iter_start;
+        if (elapsed_sec > MAX_CATCHUP_SEC) {
+            elapsed_sec = MAX_CATCHUP_SEC;
+        }
+
+        pending_cycles += elapsed_sec * CYCLES_PER_SEC;
+
         // Free-run the real BIOS from wherever it currently is. Draw_VL (and
         // any other HLE'd routine) fires via cpu_try_hle()'s PC-match inside
         // cpu_step() whenever BIOS code itself executes a genuine JSR to it
         // -- nothing here forces that call anymore.
         if (!halted) {
-            for (int i = 0; i < steps_per_frame; i++) {
+            uint64_t cycles_to_run = (uint64_t)pending_cycles;
+            pending_cycles -= (double)cycles_to_run; // keep the fractional remainder, don't just drop it
+            uint64_t cycles_target = cpu.cycles + cycles_to_run;
+            while (cpu.cycles < cycles_target) {
                 if (!cpu_step(&cpu)) {
                     printf("CPU halted: unimplemented opcode at PC=0x%04X\n", cpu.PC);
                     halted = 1;
@@ -271,6 +304,13 @@ int main(int argc, char *argv[]) {
         }
 
         display_present();
+
+        uint64_t iter_end = SDL_GetPerformanceCounter();
+        double iter_work_sec = (double)(iter_end - iter_start) / (double)perf_freq;
+        double remaining_sec = TARGET_FRAME_SEC - iter_work_sec;
+        if (remaining_sec > 0) {
+            SDL_Delay((Uint32)(remaining_sec * 1000.0));
+        }
     }
 
     display_shutdown();
