@@ -94,89 +94,6 @@ static void run_cpu_tests(Cpu *cpu) {
     }
     cpu_print_state(cpu);
 
-    // Display list: have the CPU itself assemble the triangle into RAM at
-    // DISPLAY_LIST_START via a real LDA/STA subroutine called through JSR/RTS
-    // -- not poked in directly from C.
-    //
-    // Hand-typing the ~125 program bytes this takes (each of the 25 display
-    // list bytes needs its own LDA #imm + STA extended pair) would be
-    // tedious and error-prone, so this small loop assembles them the same
-    // way the earlier phases did by hand, just generated instead of
-    // transcribed.
-    {
-        typedef struct { int16_t x1, y1, x2, y2; } Segment;
-        Segment triangle[] = {
-            { 300, 120, 200, 300 },
-            { 200, 300, 400, 300 },
-            { 400, 300, 300, 120 },
-        };
-        const uint8_t segment_count = (uint8_t)(sizeof(triangle) / sizeof(triangle[0]));
-
-        const uint16_t call_addr = RAM_START + 0x30; // JSR site
-        const uint16_t sub_addr  = RAM_START + 0x50; // subroutine body
-
-        // JSR extended -> sub_addr
-        mem_write8(call_addr, 0xBD);
-        mem_write8(call_addr + 1, (uint8_t)(sub_addr >> 8));
-        mem_write8(call_addr + 2, (uint8_t)(sub_addr & 0xFF));
-        const uint16_t after_call = call_addr + 3;
-
-        // Subroutine: for every byte of the display list, LDA #value; STA extended dest.
-        uint16_t wptr = sub_addr;
-        uint16_t dest = DISPLAY_LIST_START;
-
-        mem_write8(wptr++, 0x86); mem_write8(wptr++, segment_count);            // LDA #N
-        mem_write8(wptr++, 0xB7);                                               // STA extended
-        mem_write8(wptr++, (uint8_t)(dest >> 8));
-        mem_write8(wptr++, (uint8_t)(dest & 0xFF));
-        dest++;
-
-        for (int i = 0; i < segment_count; i++) {
-            int16_t coords[4] = { triangle[i].x1, triangle[i].y1, triangle[i].x2, triangle[i].y2 };
-            for (int c = 0; c < 4; c++) {
-                uint16_t v = (uint16_t)coords[c];
-                uint8_t bytes[2] = { (uint8_t)(v >> 8), (uint8_t)(v & 0xFF) };
-
-                for (int b = 0; b < 2; b++) {
-                    mem_write8(wptr++, 0x86); mem_write8(wptr++, bytes[b]);     // LDA #byte
-                    mem_write8(wptr++, 0xB7);                                   // STA extended
-                    mem_write8(wptr++, (uint8_t)(dest >> 8));
-                    mem_write8(wptr++, (uint8_t)(dest & 0xFF));
-                    dest++;
-                }
-            }
-        }
-        mem_write8(wptr++, 0x39); // RTS
-        const uint16_t sub_end = wptr;
-
-        cpu->PC = call_addr;
-        int dl_steps = 0;
-        const int dl_max_steps = 500; // 1 JSR + (1 LDA + 1 STA) per byte + 1 RTS, comfortably under this
-        while (cpu->PC != after_call && dl_steps < dl_max_steps) {
-            if (!cpu_step(cpu)) break;
-            dl_steps++;
-        }
-
-        int ok = (cpu->PC == after_call) && (mem_read8(DISPLAY_LIST_START) == segment_count);
-        for (uint16_t addr = DISPLAY_LIST_START + 1, i = 0; ok && i < segment_count; i++) {
-            int16_t expect[4] = { triangle[i].x1, triangle[i].y1, triangle[i].x2, triangle[i].y2 };
-            for (int c = 0; c < 4 && ok; c++) {
-                int16_t got = (int16_t)(((uint16_t)mem_read8(addr) << 8) | mem_read8(addr + 1));
-                if (got != expect[c]) ok = 0;
-                addr += 2;
-            }
-        }
-
-        if (ok) {
-            printf("display list build PASSED (%d cpu_step() calls, %u bytes written at $%04X-$%04X by code at $%04X-$%04X)\n",
-                   dl_steps, (unsigned)(1 + segment_count * 8), DISPLAY_LIST_START,
-                   DISPLAY_LIST_START + segment_count * 8, sub_addr, sub_end - 1);
-        } else {
-            printf("display list build FAILED (%d cpu_step() calls, PC=%04X)\n", dl_steps, cpu->PC);
-        }
-        cpu_print_state(cpu);
-    }
-
     // Indexed addressing (,X): zero-offset load, zero-offset store, ,X+
     // post-increment (checking X actually advances), and an 8-bit offset
     // load. Threaded as one sequential program so each step's expectations
@@ -314,7 +231,6 @@ int main(int argc, char *argv[]) {
         }
 
         display_clear();
-        display_render_from_memory(DISPLAY_LIST_START);
 
         // Redraw the HLE'd shape every frame too, the way a real Vectrex
         // game calls Draw_VL once per frame from its own game loop.

@@ -7,11 +7,6 @@
 #define RAM_START        0xC000
 #define RAM_END          0xC7FF
 
-// Display list: 1 count byte (N segments) followed by N * 8-byte segments
-// (x1,y1,x2,y2 as signed 16-bit big-endian each). Placed well clear of the
-// hand-assembled CPU test programs (0xC000-0xC0CD) and the test stack/data
-// area (0xC700+).
-#define DISPLAY_LIST_START 0xC100
 
 // AY-3-8912 sound chip
 #define AY_ADDR_LATCH    0xC800

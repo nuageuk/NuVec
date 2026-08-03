@@ -220,24 +220,52 @@ static uint16_t cpu_pop16(Cpu *cpu) {
 
 // Draw_VL: X points at a vector list -- a count-minus-1 byte followed by
 // that many (dy, dx) signed-byte pairs, each a delta from the current pen
-// position (not an absolute coordinate). Walks the list and draws each
-// segment via the existing display_draw_line(). Intensity/scale/mode-byte
-// nuances aren't modeled yet, and the pen always starts at (0,0) -- real
-// Vectrex coordinate centering/scaling is future work, same as the display
-// list renderer from the previous step.
+// position. Intensity and BIOS-scale-register modeling are future work.
 static void hle_draw_vl(Cpu *cpu) {
     uint16_t addr = cpu->X;
     uint8_t count = mem_read8(addr);
     addr++;
 
-    int pen_x = 0, pen_y = 0;
+    // TODO: replace with real BIOS scale register once game/BIOS code drives Draw_VL.
+    // Component bytes are DAC values, not pixels; 2x is a visible placeholder.
+    // Origin maps Vectrex (0,0) to window center (tied to 600x400 SDL window).
+    // Y is negated: Vectrex Y increases upward, SDL Y increases downward.
+    const int scale    = 2;
+    const int origin_x = 300;
+    const int origin_y = 200;
+
+    // Pass 1: walk the vector list to find the bounding box, without drawing.
+    uint16_t scan_addr = addr;
+    int x = 0, y = 0;
+    int min_x = 0, max_x = 0, min_y = 0, max_y = 0;
+    for (uint16_t i = 0; i <= count; i++) {
+        int8_t dy = (int8_t)mem_read8(scan_addr);
+        int8_t dx = (int8_t)mem_read8(scan_addr + 1);
+        scan_addr += 2;
+
+        x += dx * scale;
+        y -= dy * scale;
+        if (x < min_x) min_x = x;
+        if (x > max_x) max_x = x;
+        if (y < min_y) min_y = y;
+        if (y > max_y) max_y = y;
+    }
+
+    int center_x = (min_x + max_x) / 2;
+    int center_y = (min_y + max_y) / 2;
+    int shift_x = origin_x - center_x;
+    int shift_y = origin_y - center_y;
+
+    // Pass 2: redraw, offsetting every point so the bounding-box center
+    // lands on (origin_x, origin_y) instead of the path's start vertex.
+    int pen_x = shift_x, pen_y = shift_y;
     for (uint16_t i = 0; i <= count; i++) {
         int8_t dy = (int8_t)mem_read8(addr);
         int8_t dx = (int8_t)mem_read8(addr + 1);
         addr += 2;
 
-        int new_x = pen_x + dx;
-        int new_y = pen_y + dy;
+        int new_x = pen_x + dx * scale;
+        int new_y = pen_y - dy * scale;
         display_draw_line(pen_x, pen_y, new_x, new_y);
         pen_x = new_x;
         pen_y = new_y;
