@@ -2,9 +2,6 @@
 #include <SDL.h>
 #include <stdio.h>
 
-#define DISPLAY_WIDTH  600
-#define DISPLAY_HEIGHT 400
-
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
 
@@ -41,8 +38,15 @@ void display_clear(void) {
     SDL_RenderClear(renderer);
 }
 
-void display_draw_line(int x1, int y1, int x2, int y2) {
-    SDL_SetRenderDrawColor(renderer, 60, 255, 120, 255); // phosphor-ish green
+void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
+    // Phosphor-ish green (60, 255, 120 at full brightness), scaled down by
+    // the vector's Z-channel intensity so persisted/erase-list vectors
+    // (see analog_render()) read as dimmer than freshly-drawn ones instead
+    // of all-or-nothing.
+    int r = (60  * brightness) / 255;
+    int g = (255 * brightness) / 255;
+    int b = (120 * brightness) / 255;
+    SDL_SetRenderDrawColor(renderer, (Uint8)r, (Uint8)g, (Uint8)b, 255);
     SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
 }
 

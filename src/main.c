@@ -2,6 +2,7 @@
 #include "memory.h"
 #include "cpu.h"
 #include "display.h"
+#include "analog.h"
 #include <SDL.h>
 
 static void run_cpu_tests(Cpu *cpu) {
@@ -184,59 +185,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // HLE Draw_VL: JSR $F3DD with X pointing at a small vector list, then
-    // verify PC resumes exactly where a real RTS would land and S stays
-    // balanced -- same verification shape as the earlier hand-rolled JSR/RTS
-    // test, just landing on an HLE'd BIOS routine instead of 6809 code. This
-    // is a one-time sanity check of the HLE mechanism itself, done here with
-    // a synthetic forced JSR; the render loop below no longer drives Draw_VL
-    // this way -- it free-runs real BIOS code instead, which triggers the
-    // same HLE interception on its own whenever it executes a genuine
-    // JSR $F3DD. The vector list this test writes to vlist_addr is left in
-    // RAM afterward but nothing forces the CPU to visit it anymore.
-    const uint16_t vlist_addr = 0xC400;
-    const uint16_t caller_addr = RAM_START + 0x320; // 0xC320
-    const uint16_t after_jsr = caller_addr + 3;
-    {
-        // count = N-1 (3 vectors), each pair is (dy, dx) as signed bytes,
-        // deltas from a pen that starts at (0,0):
-        // (0,0) -> (100,0) -> (50,90) -> (0,0), kept on-screen near the
-        // origin since Draw_VL's pen isn't centered/scaled yet.
-        mem_write8(vlist_addr + 0, 0x02); // count - 1 = 2
-        mem_write8(vlist_addr + 1, 0x00); // dy=0
-        mem_write8(vlist_addr + 2, 0x64); // dx=100
-        mem_write8(vlist_addr + 3, 0x5A); // dy=90
-        mem_write8(vlist_addr + 4, 0xCE); // dx=-50
-        mem_write8(vlist_addr + 5, 0xA6); // dy=-90
-        mem_write8(vlist_addr + 6, 0xCE); // dx=-50
-
-        mem_write8(caller_addr + 0, 0xBD); // JSR extended
-        mem_write8(caller_addr + 1, 0xF3);
-        mem_write8(caller_addr + 2, 0xDD); // -> $F3DD (HLE_DRAW_VL)
-
-        cpu.X = vlist_addr;
-        cpu.PC = caller_addr;
-        uint16_t s_before = cpu.S;
-
-        cpu_step(&cpu); // JSR extended -> pushes return addr, PC = $F3DD
-        cpu_step(&cpu); // HLE intercept: draws the shape, pops PC back (RTS-equivalent)
-
-        if (cpu.PC == after_jsr && cpu.S == s_before) {
-            printf("HLE Draw_VL test PASSED (PC=%04X resumed correctly after JSR $F3DD, S=%04X balanced)\n",
-                   cpu.PC, cpu.S);
-        } else {
-            printf("HLE Draw_VL test FAILED (PC=%04X, S=%04X, expected PC=%04X, S=%04X)\n",
-                   cpu.PC, cpu.S, after_jsr, s_before);
-        }
-        cpu_print_state(&cpu);
-    }
-
-    // Fresh reset before the render loop: run_cpu_tests() and the one-time
-    // HLE sanity check above both reused this Cpu instance as scratch space
-    // for unrelated register-level tests, so PC/registers are left in
-    // whatever state those tests wanted, not the real reset vector. The
-    // render loop below free-runs actual BIOS code, so it needs to start
-    // exactly where real hardware would.
+    // Fresh reset before the render loop: run_cpu_tests() above reused this
+    // Cpu instance as scratch space for unrelated register-level tests, so
+    // PC/registers are left in whatever state those tests wanted, not the
+    // real reset vector. The render loop below free-runs actual BIOS code,
+    // so it needs to start exactly where real hardware would.
     cpu_reset(&cpu);
 
     // Real hardware runs the 6809 at ~1.5MHz and refreshes at ~50Hz. Pace
@@ -268,8 +221,6 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        display_clear();
-
         uint64_t iter_start = SDL_GetPerformanceCounter();
         double elapsed_sec = (double)(iter_start - last_time) / (double)perf_freq;
         last_time = iter_start;
@@ -279,10 +230,11 @@ int main(int argc, char *argv[]) {
 
         pending_cycles += elapsed_sec * CYCLES_PER_SEC;
 
-        // Free-run the real BIOS from wherever it currently is. Draw_VL (and
-        // any other HLE'd routine) fires via cpu_try_hle()'s PC-match inside
-        // cpu_step() whenever BIOS code itself executes a genuine JSR to it
-        // -- nothing here forces that call anymore.
+        // Free-run the real BIOS from wherever it currently is (HLE'd
+        // routines fire via cpu_try_hle()'s PC-match inside cpu_step()).
+        // Every real VIA write this makes flows through via_write8() into
+        // analog.c's per-cycle beam integrator, building up its current-
+        // frame vector list as it goes -- not rendered directly here.
         if (!halted) {
             uint64_t cycles_to_run = (uint64_t)pending_cycles;
             pending_cycles -= (double)cycles_to_run; // keep the fractional remainder, don't just drop it
@@ -296,6 +248,14 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Render the current-frame vector list plus the still-fading
+        // previous one (analog_render(), see analog.c) every host frame,
+        // regardless of whether analog.c's own ~1/30s-of-cycles frame timer
+        // has swapped since the last SDL frame -- this is what keeps the
+        // screen showing the last real frame instead of going black
+        // whenever the CPU loop hasn't produced fresh vectors since then.
+        display_clear();
+        analog_render();
         display_present();
 
         uint64_t iter_end = SDL_GetPerformanceCounter();

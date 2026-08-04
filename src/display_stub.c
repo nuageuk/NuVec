@@ -15,7 +15,8 @@ static int min_x, max_x, min_y, max_y;
 int display_init(void) { return 1; }
 void display_clear(void) {}
 
-void display_draw_line(int x1, int y1, int x2, int y2) {
+void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
+    (void)brightness;
     line_count++;
     if (!have_bounds) {
         min_x = max_x = x1;
