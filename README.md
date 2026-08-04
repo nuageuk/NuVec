@@ -10,13 +10,16 @@ A from-scratch Vectrex emulator — 6809 CPU core + real vector display via a cy
 
 > **This project is under active, early development.** Core emulation — CPU, VIA, and vector/text rendering — is working and has run real commercial cartridges to completion. Missing pieces are sound, controls, and a proper loading UI (see [Status](#status)). Expect bugs and breaking changes on every commit.
 
-### Space Wars (1982) — boot through gameplay
 
-![Space Wars gameplay](screenshots/nuvecboot040826.gif)
 
 ## What is this?
 
 NuVec is a standalone Vectrex emulator: point it at a BIOS image and a ROM, and it boots and renders the real game. Long-term, the plan is to also support building original Vectrex homebrew games on top of it.
+
+
+## Space Wars (1982) — boot through gameplay
+
+![Space Wars gameplay](screenshots/nuvecboot040826.gif)
 
 ## Status
 
