@@ -129,3 +129,9 @@ Vectrex, game ROMs and BIOS images are not included in this repository.
 ## Contributing
 
 The project is still changing rapidly, so it is not yet organised around external contributions. Bug reports, technical discussion and issue submissions are welcome.
+
+## References
+
+- MOS Technology 6522 Versatile Interface Adapter datasheet
+- Vectrex Programmer's Manual
+- Vectrex hardware and vector-display documentation at playvectrex.com
