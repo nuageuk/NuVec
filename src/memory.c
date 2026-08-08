@@ -1,4 +1,5 @@
 #include "memory.h"
+#include "ay.h"
 #include "via.h"
 #include <stdio.h>
 
@@ -9,6 +10,9 @@ uint8_t cart_rom[CART_ROM_SIZE];
 uint8_t mem_read8(uint16_t address) {
     if (address >= CART_ROM_START && address <= CART_ROM_END) {
         return cart_rom[address - CART_ROM_START];
+    }
+    if (address == AY_DATA) {
+        return ay_read_data();
     }
     if (address >= RAM_START && address <= RAM_END) {
         return ram[address - RAM_START];
@@ -23,6 +27,14 @@ uint8_t mem_read8(uint16_t address) {
 }
 
 void mem_write8(uint16_t address, uint8_t value) {
+    if (address == AY_ADDR_LATCH) {
+        ay_write_addr(value);
+        return;
+    }
+    if (address == AY_DATA) {
+        ay_write_data(value);
+        return;
+    }
     if (address >= RAM_START && address <= RAM_END) {
         ram[address - RAM_START] = value;
         return;
