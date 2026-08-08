@@ -2,6 +2,7 @@
 #include "memory.h"
 #include "analog.h"
 #include "input.h"
+#include "ay.h"
 #include <string.h>
 
 // 6522 VIA register file, timers, and shift register, per
@@ -290,11 +291,13 @@ void via_write8(uint16_t address, uint8_t value) {
     switch (reg) {
         case 0x0:
             via.orb = value;
+            ay_via_orb(value);
             analog_mux_route(value);
             return;
         case 0x1:
         case 0xF: // ORA/IRA without handshake writes the same latch
             via.ora = value;
+            ay_via_ora(value);
             analog_dac_write(value, via.orb);
             return;
         case 0x2: via.ddrb = value; return;

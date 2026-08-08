@@ -7,10 +7,6 @@
 #define RAM_START        0xC000
 #define RAM_END          0xCBFF
 
-// AY-3-8912 sound chip
-#define AY_ADDR_LATCH    0xC800
-#define AY_DATA          0xC900
-
 // 6522 VIA (I/O)
 #define VIA_START        0xD000
 #define VIA_END          0xD7FF
