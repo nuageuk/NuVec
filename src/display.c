@@ -1,7 +1,11 @@
-#include "display.h"
-#include <SDL.h>
+/* SDL vector rendering, phosphor decay, bloom, resizing, and OSD support. */
+
 #include <stdio.h>
 #include <stdlib.h>
+
+#include <SDL.h>
+
+#include "display.h"
 
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
@@ -112,7 +116,10 @@ static int recreate_decay_texture(int width, int height) {
         return 0;
     }
 
-    SDL_SetTextureBlendMode(new_texture, SDL_BLENDMODE_NONE);
+    if (SDL_SetTextureBlendMode(new_texture, SDL_BLENDMODE_NONE) != 0) {
+        SDL_DestroyTexture(new_texture);
+        return 0;
+    }
     if (decay_texture) {
         SDL_DestroyTexture(decay_texture);
     }
@@ -144,8 +151,8 @@ static int create_renderer(void) {
 
     vsync_mode = VSYNC_ON;
     SDL_GL_SetSwapInterval(1);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    if (SDL_RenderSetLogicalSize(renderer, logical_width, logical_height) != 0 ||
+    if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) != 0 ||
+        SDL_RenderSetLogicalSize(renderer, logical_width, logical_height) != 0 ||
         !recreate_decay_texture(logical_width, logical_height)) {
         if (decay_texture) {
             SDL_DestroyTexture(decay_texture);
@@ -516,9 +523,13 @@ void display_resize(int width, int height) {
         return;
     }
 
+    if (!recreate_decay_texture(render_width, render_height)) {
+        SDL_RenderSetLogicalSize(renderer, logical_width, logical_height);
+        return;
+    }
+
     logical_width = render_width;
     logical_height = render_height;
-    recreate_decay_texture(render_width, render_height);
 }
 
 void display_shutdown(void) {

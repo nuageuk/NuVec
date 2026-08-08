@@ -1,15 +1,11 @@
+/* Public register and timing interface for the MOS 6522 VIA emulation. */
+
 #ifndef VIA_H
 #define VIA_H
 
 #include <stdint.h>
 
-// Interrupt Flag / Enable Register bits this emulation actually models.
-// The other IFR/IER bits (CA1, CA2, CB1) have no interrupt source modeled,
-// so those bits never set.
-#define VIA_IFR_SR 0x04
-#define VIA_IFR_T2 0x20
-#define VIA_IFR_T1 0x40
-
+/* Resets VIA registers and the connected analog integrator. */
 void via_reset(void);
 
 // Routed from mem_read8/mem_write8 for the whole VIA_START-VIA_END range.
@@ -34,4 +30,4 @@ void via_tick(uint32_t cycles);
 // this once per instruction to decide whether to service a 6809 IRQ.
 int via_irq_pending(void);
 
-#endif // VIA_H
+#endif /* VIA_H */

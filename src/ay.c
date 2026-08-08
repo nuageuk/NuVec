@@ -1,5 +1,8 @@
-#include "ay.h"
+/* AY-3-8912 register, sound synthesis, and SDL audio-buffer emulation. */
+
 #include <SDL.h>
+
+#include "ay.h"
 
 #define AY_REGISTER_COUNT 16
 #define AY_CHANNEL_COUNT 3

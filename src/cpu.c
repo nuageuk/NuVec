@@ -1,9 +1,20 @@
+/* Motorola 6809 CPU core, instruction dispatch, and interrupt handling. */
+
+#include <stdio.h>
+#include <string.h>
+
 #include "cpu.h"
 #include "memory.h"
 #include "via.h"
-#include <inttypes.h>
-#include <stdio.h>
-#include <string.h>
+
+// BIOS Wait_Recal entry intercepted by the minimal high-level emulation.
+#define HLE_WAIT_RECAL 0xF192
+
+typedef enum {
+    ADDR_DIRECT,
+    ADDR_EXTENDED,
+    ADDR_INDEXED
+} AddrMode;
 
 void cpu_reset(Cpu *cpu) {
     memset(cpu, 0, sizeof(*cpu));
@@ -630,16 +641,6 @@ static void hle_wait_recal(Cpu *cpu) {
     cpu->DP = 0xD0;
 }
 
-// Lets debug/diagnostic code (see main.c's BIOS tracer) temporarily disable
-// HLE interception so real ROM bytes execute through the CPU core even at
-// an address that's normally hooked -- e.g. to inspect what $F192 actually
-// does before trusting it's really Wait_Recal. Defaults on.
-static int hle_enabled = 1;
-
-void cpu_set_hle_enabled(int enabled) {
-    hle_enabled = enabled;
-}
-
 // Intercepts known BIOS entry addresses before opcode fetch. Runs the native
 // handler, then pops the return address off S (equivalent to RTS).
 //
@@ -651,10 +652,6 @@ void cpu_set_hle_enabled(int enabled) {
 // Draw_VL's *result* here would just intercept and discard whatever real
 // VIA writes its actual bytes would otherwise perform if PC ever reaches it.
 static int cpu_try_hle(Cpu *cpu) {
-    if (!hle_enabled) {
-        return 0;
-    }
-
     switch (cpu->PC) {
         case HLE_WAIT_RECAL:
             hle_wait_recal(cpu);
@@ -2041,21 +2038,4 @@ int cpu_step(Cpu *cpu) {
     int ok = cpu_step_dispatch(cpu);
     via_tick((uint32_t)(cpu->cycles - cycles_before));
     return ok;
-}
-
-void cpu_print_state(const Cpu *cpu) {
-    printf("A=%02X B=%02X D=%04X\n", cpu->A, cpu->B, cpu->D);
-    printf("X=%04X Y=%04X U=%04X S=%04X PC=%04X\n",
-           cpu->X, cpu->Y, cpu->U, cpu->S, cpu->PC);
-    printf("DP=%02X CC=%02X [%c%c%c%c%c%c%c%c]\n",
-           cpu->DP, cpu->CC,
-           (cpu->CC & CC_E) ? 'E' : '-',
-           (cpu->CC & CC_F) ? 'F' : '-',
-           (cpu->CC & CC_H) ? 'H' : '-',
-           (cpu->CC & CC_I) ? 'I' : '-',
-           (cpu->CC & CC_N) ? 'N' : '-',
-           (cpu->CC & CC_Z) ? 'Z' : '-',
-           (cpu->CC & CC_V) ? 'V' : '-',
-           (cpu->CC & CC_C) ? 'C' : '-');
-    printf("Cycles=%" PRIu64 "\n", cpu->cycles);
 }

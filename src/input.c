@@ -1,5 +1,8 @@
-#include "input.h"
+/* Keyboard-to-Vectrex-controller state mapping. */
+
 #include <string.h>
+
+#include "input.h"
 
 enum {
     DIRECTION_UP    = 1u << 0,

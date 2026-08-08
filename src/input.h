@@ -1,3 +1,5 @@
+/* Keyboard mappings and controller state exposed to the VIA. */
+
 #ifndef INPUT_H
 #define INPUT_H
 
@@ -25,8 +27,13 @@ typedef struct {
     int8_t joystick_y;
 } InputState;
 
+/* Clears all held buttons and joystick directions. */
 void input_reset(void);
+
+/* Applies one SDL key transition to the emulated controller state. */
 void input_handle_key(SDL_Keycode key, int pressed);
+
+/* Returns the current read-only controller state. */
 const InputState *input_get_state(void);
 
-#endif // INPUT_H
+#endif /* INPUT_H */

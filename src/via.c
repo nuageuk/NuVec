@@ -1,9 +1,20 @@
-#include "via.h"
-#include "memory.h"
-#include "analog.h"
-#include "input.h"
-#include "ay.h"
+/* MOS 6522 VIA registers, timers, shift register, and peripheral routing. */
+
 #include <string.h>
+
+#include "analog.h"
+#include "ay.h"
+#include "input.h"
+#include "memory.h"
+#include "via.h"
+
+// Interrupt sources modeled in the IFR/IER registers. Other source bits
+// never set because CA1, CA2, and CB1 inputs are not modeled.
+enum {
+    VIA_IFR_SR = 0x04,
+    VIA_IFR_T2 = 0x20,
+    VIA_IFR_T1 = 0x40
+};
 
 // 6522 VIA register file, timers, and shift register, per
 // docs/hardware-spec.md sections 1-4. Drives the analog beam integrator in

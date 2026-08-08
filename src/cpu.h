@@ -1,3 +1,5 @@
+/* Public state and execution interface for the Motorola 6809 CPU core. */
+
 #ifndef CPU_H
 #define CPU_H
 
@@ -330,21 +332,6 @@
 #define OP3_CMPS_EXT 0xBC
 #define OP3_CMPS_IDX 0xAC
 
-// HLE (high-level emulation) BIOS routine addresses. When PC lands on one of
-// these, cpu_step() calls a native handler instead of executing whatever
-// 6809 bytes are actually sitting there, then simulates the RTS.
-#define HLE_DRAW_VL     0xF3DD
-// Confirmed against the real loaded BIOS: $F192 opens LDX/LEAX/STX (a
-// memory-counter increment idiom) then BSR / LDA #imm / CMPA direct / BEQ -4
-// -- a textbook poll-until-flag-matches loop, i.e. genuinely a wait routine.
-#define HLE_WAIT_RECAL  0xF192
-
-typedef enum {
-    ADDR_DIRECT,
-    ADDR_EXTENDED,
-    ADDR_INDEXED
-} AddrMode;
-
 typedef struct {
     // Struct/uint16_t aliasing here assumes a little-endian target (x86/x86_64).
     union {
@@ -373,12 +360,10 @@ typedef struct {
     int waiting_for_irq;
 } Cpu;
 
+/* Resets the CPU and connected VIA to their hardware startup state. */
 void cpu_reset(Cpu *cpu);
-void cpu_print_state(const Cpu *cpu);
+
+/* Executes one instruction or wait-state cycle; returns zero if unsupported. */
 int cpu_step(Cpu *cpu);
 
-// Debug-only: temporarily disable/enable HLE BIOS interception so real ROM
-// bytes execute even at a normally-hooked address (see main.c's BIOS tracer).
-void cpu_set_hle_enabled(int enabled);
-
-#endif // CPU_H
+#endif /* CPU_H */

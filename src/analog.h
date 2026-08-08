@@ -1,3 +1,5 @@
+/* Public interface for the Vectrex analog beam integrator. */
+
 #ifndef ANALOG_H
 #define ANALOG_H
 
@@ -27,6 +29,7 @@ enum {
     ANALOG_COLORS = 128
 };
 
+/* Resets the sample-and-holds, beam position, and vector checkpoints. */
 void analog_reset(void);
 
 // Called after every ORA write: value is the raw DAC byte (via.ora) and orb
@@ -55,4 +58,4 @@ void analog_step(int ramp_active, int blank_on, int zero_ref);
 // does NOT clear or present itself, so the caller controls that pacing.
 void analog_render(void);
 
-#endif // ANALOG_H
+#endif /* ANALOG_H */

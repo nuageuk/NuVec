@@ -1,10 +1,9 @@
-#include "analog.h"
-#include "display.h"
+/* Vectrex sample-and-hold, beam integration, and vector capture logic. */
+
 #include <string.h>
 
-// Implements docs/hardware-spec.md sections 5-6 (Vectrex analog signal
-// path and the segment-tracing behavior the emulator needs to produce
-// from it). See analog.h for the public interface this presents to via.c.
+#include "analog.h"
+#include "display.h"
 
 // The DAC/mux sample-and-holds (docs/hardware-spec.md section 5).
 typedef struct {
@@ -214,10 +213,8 @@ void analog_step(int ramp_active, int blank_on, int zero_ref) {
 }
 
 // Scales ALG_MAX_X/Y integrator-space coordinates down to actual window
-// pixels, fitting the whole integrator range into the window without
-// distortion and centering it (nuvec's SDL window isn't resizable, so this
-// only ever needs doing once -- but it's cheap enough to just redo per
-// segment).
+// pixels, fitting the whole integrator range into the logical display
+// without distortion and centering it.
 static void analog_to_screen(int32_t ax, int32_t ay, int *sx, int *sy) {
     static const double scale_x = (double)ALG_MAX_X / DISPLAY_WIDTH;
     static const double scale_y = (double)ALG_MAX_Y / DISPLAY_HEIGHT;

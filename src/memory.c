@@ -1,13 +1,16 @@
+/* Vectrex address decoding, memory backing storage, and ROM loading. */
+
+#include <stdio.h>
+
 #include "memory.h"
 #include "via.h"
-#include <stdio.h>
 
 uint8_t ram[RAM_END - RAM_START + 1];
 uint8_t bios_rom[BIOS_ROM_END - BIOS_ROM_START + 1];
 uint8_t cart_rom[CART_ROM_SIZE];
 
 uint8_t mem_read8(uint16_t address) {
-    if (address >= CART_ROM_START && address <= CART_ROM_END) {
+    if (address <= CART_ROM_END) {
         return cart_rom[address - CART_ROM_START];
     }
     if (address >= RAM_START && address <= RAM_END) {
@@ -16,7 +19,7 @@ uint8_t mem_read8(uint16_t address) {
     if (address >= VIA_START && address <= VIA_END) {
         return via_read8(address);
     }
-    if (address >= BIOS_ROM_START && address <= BIOS_ROM_END) {
+    if (address >= BIOS_ROM_START) {
         return bios_rom[address - BIOS_ROM_START];
     }
     return 0;
@@ -34,8 +37,8 @@ void mem_write8(uint16_t address, uint8_t value) {
     // Writes to ROM or unmapped regions are silently ignored.
 }
 
-int mem_load_rom(const char* filepath, uint8_t* dest, size_t max_size) {
-    FILE* f = fopen(filepath, "rb");
+int mem_load_rom(const char *filepath, uint8_t *dest, size_t max_size) {
+    FILE *f = fopen(filepath, "rb");
     if (!f) {
         return 0;
     }
