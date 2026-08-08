@@ -227,10 +227,8 @@ int main(int argc, char *argv[]) {
                 } else if (event.type == SDL_KEYDOWN && !event.key.repeat &&
                            event.key.keysym.sym == SDLK_F3) {
                     vsync_mode = display_toggle_vsync();
-                    if (vsync_mode == VSYNC_OFF) {
-                        last_time = SDL_GetPerformanceCounter();
-                        cycle_debt = 0.0;
-                    }
+                    last_time = SDL_GetPerformanceCounter();
+                    cycle_debt = 0.0;
                 } else {
                     input_handle_key(event.key.keysym.sym, event.type == SDL_KEYDOWN);
                 }
