@@ -195,17 +195,16 @@ int main(int argc, char *argv[]) {
     // so it needs to start exactly where real hardware would.
     cpu_reset(&cpu);
 
-    // Simulation advances in fixed 1/50-second steps while rendering is
-    // paced independently by vsync (or a 50 Hz delay when vsync is off).
-    const uint64_t CPU_CYCLES_PER_SEC = 1500000;
-    const uint64_t SIMULATION_HZ = 50;
-    const uint64_t CYCLES_PER_SIMULATION_STEP = CPU_CYCLES_PER_SEC / SIMULATION_HZ;
-    const double SIMULATION_STEP_SEC = 1.0 / (double)SIMULATION_HZ;
+    // Simulation follows wall-clock time at the 1.5 MHz CPU rate while
+    // rendering is paced independently by vsync (or a 50 Hz fallback).
+    const double CPU_CYCLES_PER_SEC = 1500000.0;
+    const uint64_t CYCLE_BATCH_SIZE = 100;
+    const double FALLBACK_FRAME_SEC = 1.0 / 50.0;
+    const double MAX_CATCHUP_CYCLES = CPU_CYCLES_PER_SEC * FALLBACK_FRAME_SEC * 4.0;
 
     const uint64_t perf_freq = SDL_GetPerformanceFrequency();
     uint64_t last_time = SDL_GetPerformanceCounter();
-    double simulation_accumulator = 0.0;
-    uint64_t simulation_cycle_target = cpu.cycles;
+    double cycle_debt = 0.0;
     DisplayVsyncMode vsync_mode = VSYNC_ON;
 
     int halted = 0;
@@ -238,24 +237,29 @@ int main(int argc, char *argv[]) {
         uint64_t iter_start = SDL_GetPerformanceCounter();
         double elapsed_sec = (double)(iter_start - last_time) / (double)perf_freq;
         last_time = iter_start;
-        simulation_accumulator += elapsed_sec;
-
-        while (simulation_accumulator >= SIMULATION_STEP_SEC) {
-            simulation_cycle_target += CYCLES_PER_SIMULATION_STEP;
-            simulation_accumulator -= SIMULATION_STEP_SEC;
+        cycle_debt += elapsed_sec * CPU_CYCLES_PER_SEC;
+        if (cycle_debt > MAX_CATCHUP_CYCLES) {
+            cycle_debt = MAX_CATCHUP_CYCLES;
         }
 
-        // Pay all accumulated simulation debt before rendering. The target
-        // is cumulative so an instruction that crosses a step boundary is
-        // accounted for by the next step instead of causing clock drift.
-        if (!halted) {
-            while (cpu.cycles < simulation_cycle_target) {
+        // Pay the cycle debt in small batches. Instruction-boundary
+        // overshoot remains as negative debt and is absorbed next time.
+        while (!halted && cycle_debt >= 1.0) {
+            uint64_t batch_cycles = (uint64_t)cycle_debt;
+            if (batch_cycles > CYCLE_BATCH_SIZE) {
+                batch_cycles = CYCLE_BATCH_SIZE;
+            }
+
+            uint64_t batch_start = cpu.cycles;
+            uint64_t batch_target = batch_start + batch_cycles;
+            while (cpu.cycles < batch_target) {
                 if (!cpu_step(&cpu)) {
                     printf("CPU halted: unimplemented opcode at PC=0x%04X\n", cpu.PC);
                     halted = 1;
                     break;
                 }
             }
+            cycle_debt -= (double)(cpu.cycles - batch_start);
         }
 
         // Render the current-frame vector list plus the completed previous
@@ -271,7 +275,7 @@ int main(int argc, char *argv[]) {
         uint64_t iter_end = SDL_GetPerformanceCounter();
         double iter_work_sec = (double)(iter_end - iter_start) / (double)perf_freq;
         if (vsync_mode == VSYNC_OFF) {
-            double remaining_sec = SIMULATION_STEP_SEC - iter_work_sec;
+            double remaining_sec = FALLBACK_FRAME_SEC - iter_work_sec;
             if (remaining_sec > 0) {
                 SDL_Delay((Uint32)(remaining_sec * 1000.0));
             }

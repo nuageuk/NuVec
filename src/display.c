@@ -62,6 +62,9 @@ static int recreate_decay_texture(int width, int height) {
 }
 
 static void destroy_renderer_resources(void) {
+    if (renderer) {
+        SDL_SetRenderTarget(renderer, NULL);
+    }
     if (decay_texture) {
         SDL_DestroyTexture(decay_texture);
         decay_texture = NULL;
