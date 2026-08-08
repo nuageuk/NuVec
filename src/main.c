@@ -228,6 +228,9 @@ int main(int argc, char *argv[]) {
                 if (event.type == SDL_KEYDOWN && !event.key.repeat &&
                     event.key.keysym.sym == SDLK_F1) {
                     display_toggle_decay();
+                } else if (event.type == SDL_KEYDOWN && !event.key.repeat &&
+                           event.key.keysym.sym == SDLK_F2) {
+                    display_toggle_bloom();
                 } else {
                     input_handle_key(event.key.keysym.sym, event.type == SDL_KEYDOWN);
                 }

@@ -25,6 +25,7 @@ static HistoryFrame history[DECAY_FRAMES];
 static HistoryFrame *capture_frame = NULL;
 static uint64_t frame_counter = 0;
 static DisplayDecayMode decay_mode = DECAY_ON;
+static DisplayBloomMode bloom_mode = BLOOM_ON;
 
 static void clear_renderer(void) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
@@ -60,6 +61,27 @@ static int recreate_decay_texture(int width, int height) {
 
 static int scale_coordinate(int value, int logical_size, int reference_size) {
     return (int)((int64_t)value * logical_size / reference_size);
+}
+
+static void render_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
+    if (bloom_mode == BLOOM_ON) {
+        static const int offsets[4][2] = {
+            { -BLOOM_OFFSET, 0 },
+            {  BLOOM_OFFSET, 0 },
+            { 0, -BLOOM_OFFSET },
+            { 0,  BLOOM_OFFSET }
+        };
+
+        SDL_SetRenderDrawColor(renderer, brightness, brightness, brightness, BLOOM_ALPHA);
+        for (size_t i = 0; i < 4; i++) {
+            SDL_RenderDrawLine(renderer,
+                               x1 + offsets[i][0], y1 + offsets[i][1],
+                               x2 + offsets[i][0], y2 + offsets[i][1]);
+        }
+    }
+
+    SDL_SetRenderDrawColor(renderer, brightness, brightness, brightness, 255);
+    SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
 }
 
 static void free_history(void) {
@@ -129,12 +151,11 @@ static void render_decay_history(void) {
         for (size_t i = 0; i < frame->count; i++) {
             DisplayLine *line = &frame->lines[i];
             Uint8 brightness = (Uint8)((line->brightness * remaining) / DECAY_FRAMES);
-            SDL_SetRenderDrawColor(renderer, brightness, brightness, brightness, 255);
-            SDL_RenderDrawLine(renderer,
-                               scale_coordinate(line->x1, logical_width, DISPLAY_WIDTH),
-                               scale_coordinate(line->y1, logical_height, DISPLAY_HEIGHT),
-                               scale_coordinate(line->x2, logical_width, DISPLAY_WIDTH),
-                               scale_coordinate(line->y2, logical_height, DISPLAY_HEIGHT));
+            render_line(scale_coordinate(line->x1, logical_width, DISPLAY_WIDTH),
+                        scale_coordinate(line->y1, logical_height, DISPLAY_HEIGHT),
+                        scale_coordinate(line->x2, logical_width, DISPLAY_WIDTH),
+                        scale_coordinate(line->y2, logical_height, DISPLAY_HEIGHT),
+                        brightness);
         }
     }
 
@@ -169,6 +190,7 @@ int display_init(void) {
         SDL_Quit();
         return 0;
     }
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
     if (SDL_RenderSetLogicalSize(renderer, DISPLAY_WIDTH, DISPLAY_HEIGHT) != 0) {
         fprintf(stderr, "SDL_RenderSetLogicalSize failed: %s\n", SDL_GetError());
@@ -211,12 +233,11 @@ void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
         return;
     }
 
-    SDL_SetRenderDrawColor(renderer, brightness, brightness, brightness, 255);
-    SDL_RenderDrawLine(renderer,
-                       scale_coordinate(x1, logical_width, DISPLAY_WIDTH),
-                       scale_coordinate(y1, logical_height, DISPLAY_HEIGHT),
-                       scale_coordinate(x2, logical_width, DISPLAY_WIDTH),
-                       scale_coordinate(y2, logical_height, DISPLAY_HEIGHT));
+    render_line(scale_coordinate(x1, logical_width, DISPLAY_WIDTH),
+                scale_coordinate(y1, logical_height, DISPLAY_HEIGHT),
+                scale_coordinate(x2, logical_width, DISPLAY_WIDTH),
+                scale_coordinate(y2, logical_height, DISPLAY_HEIGHT),
+                brightness);
 }
 
 void display_present(void) {
@@ -237,6 +258,10 @@ void display_toggle_decay(void) {
         decay_mode = DECAY_ON;
         frame_counter = 0;
     }
+}
+
+void display_toggle_bloom(void) {
+    bloom_mode = bloom_mode == BLOOM_ON ? BLOOM_OFF : BLOOM_ON;
 }
 
 void display_resize(int width, int height) {

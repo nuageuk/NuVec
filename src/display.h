@@ -4,11 +4,18 @@
 #include <stdint.h>
 
 #define DECAY_FRAMES 2
+#define BLOOM_OFFSET 2
+#define BLOOM_ALPHA 64
 
 typedef enum {
     DECAY_OFF,
     DECAY_ON
 } DisplayDecayMode;
+
+typedef enum {
+    BLOOM_OFF,
+    BLOOM_ON
+} DisplayBloomMode;
 
 // Returns 1 on success, 0 on failure.
 int display_init(void);
@@ -22,6 +29,7 @@ void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness);
 
 void display_present(void);
 void display_toggle_decay(void);
+void display_toggle_bloom(void);
 void display_resize(int width, int height);
 void display_shutdown(void);
 

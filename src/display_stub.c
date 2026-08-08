@@ -35,6 +35,7 @@ void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
 
 void display_present(void) {}
 void display_toggle_decay(void) {}
+void display_toggle_bloom(void) {}
 void display_resize(int width, int height) { (void)width; (void)height; }
 void display_shutdown(void) {}
 
