@@ -16,6 +16,7 @@ typedef struct {
 
 typedef struct {
     DisplayLine *lines;
+    size_t first;
     size_t count;
     size_t capacity;
     uint64_t timestamp;
@@ -63,8 +64,9 @@ static int scale_coordinate(int value, int logical_size, int reference_size) {
     return (int)((int64_t)value * logical_size / reference_size);
 }
 
-static void render_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
-    if (bloom_mode == BLOOM_ON) {
+static void render_line(int x1, int y1, int x2, int y2, uint8_t brightness,
+                        int apply_bloom) {
+    if (apply_bloom && bloom_mode == BLOOM_ON) {
         static const int offsets[4][2] = {
             { -BLOOM_OFFSET, 0 },
             {  BLOOM_OFFSET, 0 },
@@ -88,6 +90,7 @@ static void free_history(void) {
     for (size_t i = 0; i < DECAY_FRAMES; i++) {
         free(history[i].lines);
         history[i].lines = NULL;
+        history[i].first = 0;
         history[i].count = 0;
         history[i].capacity = 0;
         history[i].timestamp = 0;
@@ -101,6 +104,7 @@ static void purge_expired_history(void) {
     }
 
     HistoryFrame *expired = &history[(frame_counter - DECAY_FRAMES) % DECAY_FRAMES];
+    expired->first = 0;
     expired->count = 0;
     expired->timestamp = 0;
 }
@@ -110,18 +114,34 @@ static void capture_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
         return;
     }
 
-    if (capture_frame->count == capture_frame->capacity) {
+    if (capture_frame->count == capture_frame->capacity &&
+        capture_frame->capacity < DECAY_MAX_SEGMENTS) {
         size_t new_capacity = capture_frame->capacity ? capture_frame->capacity * 2 : 1024;
+        if (new_capacity > DECAY_MAX_SEGMENTS) {
+            new_capacity = DECAY_MAX_SEGMENTS;
+        }
         DisplayLine *new_lines = realloc(capture_frame->lines,
                                          new_capacity * sizeof(*new_lines));
-        if (!new_lines) {
-            return;
+        if (new_lines) {
+            capture_frame->lines = new_lines;
+            capture_frame->capacity = new_capacity;
         }
-        capture_frame->lines = new_lines;
-        capture_frame->capacity = new_capacity;
     }
 
-    DisplayLine *line = &capture_frame->lines[capture_frame->count++];
+    if (capture_frame->capacity == 0) {
+        return;
+    }
+
+    size_t index;
+    if (capture_frame->count < capture_frame->capacity) {
+        index = (capture_frame->first + capture_frame->count) % capture_frame->capacity;
+        capture_frame->count++;
+    } else {
+        index = capture_frame->first;
+        capture_frame->first = (capture_frame->first + 1) % capture_frame->capacity;
+    }
+
+    DisplayLine *line = &capture_frame->lines[index];
     line->x1 = x1;
     line->y1 = y1;
     line->x2 = x2;
@@ -129,11 +149,43 @@ static void capture_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
     line->brightness = brightness;
 }
 
+static void trim_decay_history(uint64_t frame_count) {
+    size_t total = 0;
+    for (uint64_t offset = frame_count; offset > 0; offset--) {
+        uint64_t timestamp = frame_counter - (offset - 1);
+        HistoryFrame *frame = &history[timestamp % DECAY_FRAMES];
+        if (frame->timestamp == timestamp) {
+            total += frame->count;
+        }
+    }
+
+    if (total <= DECAY_MAX_SEGMENTS) {
+        return;
+    }
+
+    size_t drop = total - DECAY_MAX_SEGMENTS;
+    for (uint64_t offset = frame_count; offset > 0 && drop > 0; offset--) {
+        uint64_t timestamp = frame_counter - (offset - 1);
+        HistoryFrame *frame = &history[timestamp % DECAY_FRAMES];
+        if (frame->timestamp != timestamp) {
+            continue;
+        }
+
+        size_t frame_drop = drop < frame->count ? drop : frame->count;
+        if (frame_drop > 0) {
+            frame->first = (frame->first + frame_drop) % frame->capacity;
+        }
+        frame->count -= frame_drop;
+        drop -= frame_drop;
+    }
+}
+
 static void render_decay_history(void) {
     uint64_t frame_count = frame_counter + 1;
     if (frame_count > DECAY_FRAMES) {
         frame_count = DECAY_FRAMES;
     }
+    trim_decay_history(frame_count);
 
     SDL_SetRenderTarget(renderer, decay_texture);
     clear_renderer();
@@ -149,13 +201,13 @@ static void render_decay_history(void) {
 
         unsigned remaining = DECAY_FRAMES - (unsigned)age;
         for (size_t i = 0; i < frame->count; i++) {
-            DisplayLine *line = &frame->lines[i];
+            DisplayLine *line = &frame->lines[(frame->first + i) % frame->capacity];
             Uint8 brightness = (Uint8)((line->brightness * remaining) / DECAY_FRAMES);
             render_line(scale_coordinate(line->x1, logical_width, DISPLAY_WIDTH),
                         scale_coordinate(line->y1, logical_height, DISPLAY_HEIGHT),
                         scale_coordinate(line->x2, logical_width, DISPLAY_WIDTH),
                         scale_coordinate(line->y2, logical_height, DISPLAY_HEIGHT),
-                        brightness);
+                        brightness, age == 0);
         }
     }
 
@@ -218,6 +270,7 @@ int display_init(void) {
 void display_clear(void) {
     if (decay_mode == DECAY_ON) {
         capture_frame = &history[frame_counter % DECAY_FRAMES];
+        capture_frame->first = 0;
         capture_frame->count = 0;
         capture_frame->timestamp = frame_counter;
         return;
@@ -237,7 +290,7 @@ void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
                 scale_coordinate(y1, logical_height, DISPLAY_HEIGHT),
                 scale_coordinate(x2, logical_width, DISPLAY_WIDTH),
                 scale_coordinate(y2, logical_height, DISPLAY_HEIGHT),
-                brightness);
+                brightness, 1);
 }
 
 void display_present(void) {

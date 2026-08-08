@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define DECAY_FRAMES 2
+#define DECAY_MAX_SEGMENTS 2048
 #define BLOOM_OFFSET 2
 #define BLOOM_ALPHA 64
 
