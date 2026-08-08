@@ -7,7 +7,7 @@
 #define AY_CPU_CYCLES_PER_TICK 16
 #define AY_SAMPLE_RATE 44100
 #define AY_BUFFER_SAMPLES 512
-#define AY_SAMPLE_RING_SIZE 4096
+#define AY_SAMPLE_RING_SIZE 2048
 #define AY_NOISE_PERIOD_REGISTER 6
 #define AY_MIXER_REGISTER 7
 #define AY_AMPLITUDE_REGISTER 8
@@ -22,8 +22,8 @@
 static uint8_t registers[AY_REGISTER_COUNT];
 static uint8_t selected_register;
 static SDL_AudioDeviceID audio_device;
-static uint16_t tone_counters[AY_CHANNEL_COUNT];
-static uint8_t tone_outputs[AY_CHANNEL_COUNT];
+static float volume_table[16];
+static float tone_phases[AY_CHANNEL_COUNT];
 static uint16_t noise_counter;
 static uint32_t noise_lfsr;
 static uint16_t envelope_counter;
@@ -46,17 +46,42 @@ static uint16_t tone_period(int channel) {
     return period ? period : 1;
 }
 
-static void clock_tones(void) {
-    for (int channel = 0; channel < AY_CHANNEL_COUNT; channel++) {
-        if (tone_counters[channel] == 0) {
-            tone_counters[channel] = tone_period(channel);
-        }
-
-        tone_counters[channel]--;
-        if (tone_counters[channel] == 0) {
-            tone_outputs[channel] ^= 1;
-        }
+static float poly_blep(float phase, float phase_increment) {
+    if (phase < phase_increment) {
+        float t = phase / phase_increment;
+        return t * t - 2.0f * t + 1.0f;
     }
+    if (phase > 1.0f - phase_increment) {
+        float t = (phase - 1.0f) / phase_increment;
+        return -(t * t);
+    }
+    return 0.0f;
+}
+
+static float tone_sample(int channel) {
+    float frequency = (float)AY_CLOCK_RATE /
+                      (2.0f * (float)tone_period(channel));
+    float phase_increment = frequency / (float)AY_SAMPLE_RATE;
+    if (phase_increment > 0.5f) {
+        phase_increment = 0.5f;
+    }
+
+    float phase = tone_phases[channel];
+    float output = phase < 0.5f ? 1.0f : 0.0f;
+    output -= poly_blep(phase, phase_increment);
+
+    float falling_edge_phase = phase + 0.5f;
+    if (falling_edge_phase >= 1.0f) {
+        falling_edge_phase -= 1.0f;
+    }
+    output += poly_blep(falling_edge_phase, phase_increment);
+
+    phase += phase_increment;
+    if (phase >= 1.0f) {
+        phase -= 1.0f;
+    }
+    tone_phases[channel] = phase;
+    return output;
 }
 
 static uint8_t noise_period(void) {
@@ -114,10 +139,12 @@ static void step_envelope(void) {
     switch (shape) {
         case 0x08:
             envelope_position = 15;
+            envelope_direction = -1;
             break;
         case 0x0A:
         case 0x0E:
             envelope_direction = (int8_t)-envelope_direction;
+            envelope_position = envelope_direction < 0 ? 15 : 0;
             break;
         case 0x0B:
         case 0x0D:
@@ -126,6 +153,7 @@ static void step_envelope(void) {
             break;
         case 0x0C:
             envelope_position = 0;
+            envelope_direction = 1;
             break;
         case 0x0F:
             envelope_position = 0;
@@ -154,23 +182,30 @@ static void clock_envelope(void) {
 
 static float mix_channels(void) {
     float mixed = 0.0f;
+    int active_channels = 0;
     uint8_t mixer = registers[AY_MIXER_REGISTER];
     uint8_t noise_output = noise_lfsr & 1u;
 
     for (int channel = 0; channel < AY_CHANNEL_COUNT; channel++) {
+        float tone_output = tone_sample(channel);
         uint8_t tone_disabled = (mixer >> channel) & 1u;
         uint8_t noise_disabled = (mixer >> (channel + 3)) & 1u;
-        uint8_t channel_output = (tone_outputs[channel] | tone_disabled) &
-                                 (noise_output | noise_disabled);
+        uint8_t source_active = !(tone_disabled && noise_disabled);
+        if (source_active) {
+            active_channels++;
+        }
+        float channel_output = source_active
+                                 ? (tone_disabled ? 1.0f : tone_output) *
+                                   (noise_disabled ? 1.0f : (float)noise_output)
+                                 : 0.0f;
         uint8_t amplitude_register = registers[AY_AMPLITUDE_REGISTER + channel];
         uint8_t amplitude_level = (amplitude_register & 0x10)
                                     ? envelope_position
                                     : (amplitude_register & 0x0F);
-        float amplitude = (float)amplitude_level / 15.0f;
-        mixed += channel_output ? amplitude : -amplitude;
+        mixed += channel_output * volume_table[amplitude_level];
     }
 
-    return mixed / (float)AY_CHANNEL_COUNT;
+    return mixed / (float)(active_channels ? active_channels : 1);
 }
 
 static void queue_sample(float sample) {
@@ -203,8 +238,12 @@ static void audio_callback(void *userdata, Uint8 *stream, int length) {
 int ay_init(void) {
     SDL_AudioSpec desired = { 0 };
 
-    SDL_memset(tone_counters, 0, sizeof(tone_counters));
-    SDL_memset(tone_outputs, 0, sizeof(tone_outputs));
+    volume_table[0] = 0.0f;
+    volume_table[15] = 1.0f;
+    for (int level = 14; level >= 1; level--) {
+        volume_table[level] = volume_table[level + 1] * 0.708f;
+    }
+    SDL_memset(tone_phases, 0, sizeof(tone_phases));
     noise_counter = 0;
     noise_lfsr = AY_NOISE_LFSR_SEED;
     envelope_counter = 0;
@@ -257,7 +296,6 @@ void ay_update(uint64_t cpu_cycles) {
     }
 
     for (uint64_t tick = 0; tick < ay_ticks; tick++) {
-        clock_tones();
         clock_noise();
         clock_envelope();
 
