@@ -88,8 +88,6 @@ static Uint32 fps_window_started = 0;
 static unsigned fps_frame_count = 0;
 static unsigned fps_value = 0;
 
-static void free_history(void);
-
 static void clear_renderer(void) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -136,17 +134,16 @@ static void destroy_renderer_resources(void) {
     }
 }
 
-static int create_renderer(DisplayVsyncMode mode) {
+static int create_renderer(void) {
     Uint32 flags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE;
-    if (mode == VSYNC_ON) {
-        flags |= SDL_RENDERER_PRESENTVSYNC;
-    }
 
     renderer = SDL_CreateRenderer(window, -1, flags);
     if (!renderer) {
         return 0;
     }
 
+    vsync_mode = VSYNC_ON;
+    SDL_GL_SetSwapInterval(1);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     if (SDL_RenderSetLogicalSize(renderer, logical_width, logical_height) != 0 ||
         !recreate_decay_texture(logical_width, logical_height)) {
@@ -158,12 +155,6 @@ static int create_renderer(DisplayVsyncMode mode) {
     }
 
     return 1;
-}
-
-static int recreate_renderer(DisplayVsyncMode mode) {
-    destroy_renderer_resources();
-    free_history();
-    return create_renderer(mode);
 }
 
 static int scale_coordinate(int value, int logical_size, int reference_size) {
@@ -436,8 +427,9 @@ int display_init(void) {
         return 0;
     }
 
-    if (!create_renderer(VSYNC_ON)) {
+    if (!create_renderer()) {
         fprintf(stderr, "SDL renderer setup failed: %s\n", SDL_GetError());
+        destroy_renderer_resources();
         SDL_DestroyWindow(window);
         window = NULL;
         SDL_Quit();
@@ -507,12 +499,8 @@ void display_toggle_bloom(void) {
 }
 
 DisplayVsyncMode display_toggle_vsync(void) {
-    DisplayVsyncMode requested = vsync_mode == VSYNC_ON ? VSYNC_OFF : VSYNC_ON;
-    if (recreate_renderer(requested)) {
-        vsync_mode = requested;
-    } else {
-        recreate_renderer(vsync_mode);
-    }
+    vsync_mode = vsync_mode == VSYNC_ON ? VSYNC_OFF : VSYNC_ON;
+    SDL_GL_SetSwapInterval(vsync_mode == VSYNC_ON ? 1 : 0);
     show_osd_notification(vsync_mode == VSYNC_ON ? "VSYNC ON" : "VSYNC OFF");
     return vsync_mode;
 }
