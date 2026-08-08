@@ -29,6 +29,33 @@ static void clear_renderer(void) {
     SDL_RenderClear(renderer);
 }
 
+static void fitted_render_size(int window_width, int window_height,
+                               int *render_width, int *render_height) {
+    if (window_width * DISPLAY_HEIGHT > window_height * DISPLAY_WIDTH) {
+        *render_height = window_height;
+        *render_width = window_height * DISPLAY_WIDTH / DISPLAY_HEIGHT;
+    } else {
+        *render_width = window_width;
+        *render_height = window_width * DISPLAY_HEIGHT / DISPLAY_WIDTH;
+    }
+}
+
+static int recreate_decay_texture(int width, int height) {
+    SDL_Texture *new_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                                                 SDL_TEXTUREACCESS_TARGET,
+                                                 width, height);
+    if (!new_texture) {
+        return 0;
+    }
+
+    SDL_SetTextureBlendMode(new_texture, SDL_BLENDMODE_NONE);
+    if (decay_texture) {
+        SDL_DestroyTexture(decay_texture);
+    }
+    decay_texture = new_texture;
+    return 1;
+}
+
 static void free_history(void) {
     for (size_t i = 0; i < DECAY_FRAMES; i++) {
         free(history[i].lines);
@@ -103,7 +130,8 @@ static void render_decay_history(void) {
 
     SDL_SetRenderTarget(renderer, NULL);
     clear_renderer();
-    SDL_RenderCopy(renderer, decay_texture, NULL, NULL);
+    SDL_Rect destination = { 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT };
+    SDL_RenderCopy(renderer, decay_texture, NULL, &destination);
 }
 
 int display_init(void) {
@@ -115,7 +143,7 @@ int display_init(void) {
     window = SDL_CreateWindow("NuVec",
                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                               SDL_WINDOW_SHOWN);
+                               SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     if (!window) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();
@@ -132,10 +160,17 @@ int display_init(void) {
         return 0;
     }
 
-    decay_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
-                                      SDL_TEXTUREACCESS_TARGET,
-                                      DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    if (!decay_texture) {
+    if (SDL_RenderSetLogicalSize(renderer, DISPLAY_WIDTH, DISPLAY_HEIGHT) != 0) {
+        fprintf(stderr, "SDL_RenderSetLogicalSize failed: %s\n", SDL_GetError());
+        SDL_DestroyRenderer(renderer);
+        renderer = NULL;
+        SDL_DestroyWindow(window);
+        window = NULL;
+        SDL_Quit();
+        return 0;
+    }
+
+    if (!recreate_decay_texture(DISPLAY_WIDTH, DISPLAY_HEIGHT)) {
         fprintf(stderr, "SDL_CreateTexture failed: %s\n", SDL_GetError());
         SDL_DestroyRenderer(renderer);
         renderer = NULL;
@@ -144,7 +179,6 @@ int display_init(void) {
         SDL_Quit();
         return 0;
     }
-    SDL_SetTextureBlendMode(decay_texture, SDL_BLENDMODE_NONE);
 
     return 1;
 }
@@ -189,6 +223,18 @@ void display_toggle_decay(void) {
         decay_mode = DECAY_ON;
         frame_counter = 0;
     }
+}
+
+void display_resize(int width, int height) {
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+
+    SDL_RenderSetLogicalSize(renderer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+
+    int render_width, render_height;
+    fitted_render_size(width, height, &render_width, &render_height);
+    recreate_decay_texture(render_width, render_height);
 }
 
 void display_shutdown(void) {

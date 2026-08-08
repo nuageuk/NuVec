@@ -221,6 +221,9 @@ int main(int argc, char *argv[]) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 running = 0;
+            } else if (event.type == SDL_WINDOWEVENT &&
+                       event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                display_resize(event.window.data1, event.window.data2);
             } else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
                 if (event.type == SDL_KEYDOWN && !event.key.repeat &&
                     event.key.keysym.sym == SDLK_F1) {

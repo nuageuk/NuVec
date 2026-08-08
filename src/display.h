@@ -22,13 +22,14 @@ void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness);
 
 void display_present(void);
 void display_toggle_decay(void);
+void display_resize(int width, int height);
 void display_shutdown(void);
 
 // Vectrex screen resolution and the analog->pixel mapping derived from it
 // (see analog.c's analog_render(), which uses these to convert ALG_MAX_X/Y
 // integrator-space coordinates down to actual window pixels by fitting the
 // integrator range into the window and centering it).
-#define DISPLAY_WIDTH  600
-#define DISPLAY_HEIGHT 400
+#define DISPLAY_WIDTH  480
+#define DISPLAY_HEIGHT 640
 
 #endif // DISPLAY_H
