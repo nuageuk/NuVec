@@ -27,6 +27,7 @@ static HistoryFrame *capture_frame = NULL;
 static uint64_t frame_counter = 0;
 static DisplayDecayMode decay_mode = DECAY_ON;
 static DisplayBloomMode bloom_mode = BLOOM_ON;
+static DisplayVsyncMode vsync_mode = VSYNC_ON;
 
 static void clear_renderer(void) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
@@ -58,6 +59,43 @@ static int recreate_decay_texture(int width, int height) {
     }
     decay_texture = new_texture;
     return 1;
+}
+
+static void destroy_renderer_resources(void) {
+    if (decay_texture) {
+        SDL_DestroyTexture(decay_texture);
+        decay_texture = NULL;
+    }
+    if (renderer) {
+        SDL_DestroyRenderer(renderer);
+        renderer = NULL;
+    }
+}
+
+static int create_renderer(DisplayVsyncMode mode) {
+    Uint32 flags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE;
+    if (mode == VSYNC_ON) {
+        flags |= SDL_RENDERER_PRESENTVSYNC;
+    }
+
+    renderer = SDL_CreateRenderer(window, -1, flags);
+    if (!renderer) {
+        return 0;
+    }
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    if (SDL_RenderSetLogicalSize(renderer, logical_width, logical_height) != 0 ||
+        !recreate_decay_texture(logical_width, logical_height)) {
+        destroy_renderer_resources();
+        return 0;
+    }
+
+    return 1;
+}
+
+static int recreate_renderer(DisplayVsyncMode mode) {
+    destroy_renderer_resources();
+    return create_renderer(mode);
 }
 
 static int scale_coordinate(int value, int logical_size, int reference_size) {
@@ -233,31 +271,8 @@ int display_init(void) {
         return 0;
     }
 
-    renderer = SDL_CreateRenderer(window, -1,
-                                  SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
-    if (!renderer) {
-        fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
-        SDL_DestroyWindow(window);
-        window = NULL;
-        SDL_Quit();
-        return 0;
-    }
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-
-    if (SDL_RenderSetLogicalSize(renderer, DISPLAY_WIDTH, DISPLAY_HEIGHT) != 0) {
-        fprintf(stderr, "SDL_RenderSetLogicalSize failed: %s\n", SDL_GetError());
-        SDL_DestroyRenderer(renderer);
-        renderer = NULL;
-        SDL_DestroyWindow(window);
-        window = NULL;
-        SDL_Quit();
-        return 0;
-    }
-
-    if (!recreate_decay_texture(DISPLAY_WIDTH, DISPLAY_HEIGHT)) {
-        fprintf(stderr, "SDL_CreateTexture failed: %s\n", SDL_GetError());
-        SDL_DestroyRenderer(renderer);
-        renderer = NULL;
+    if (!create_renderer(VSYNC_ON)) {
+        fprintf(stderr, "SDL renderer setup failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(window);
         window = NULL;
         SDL_Quit();
@@ -317,6 +332,16 @@ void display_toggle_bloom(void) {
     bloom_mode = bloom_mode == BLOOM_ON ? BLOOM_OFF : BLOOM_ON;
 }
 
+DisplayVsyncMode display_toggle_vsync(void) {
+    DisplayVsyncMode requested = vsync_mode == VSYNC_ON ? VSYNC_OFF : VSYNC_ON;
+    if (recreate_renderer(requested)) {
+        vsync_mode = requested;
+    } else {
+        recreate_renderer(vsync_mode);
+    }
+    return vsync_mode;
+}
+
 void display_resize(int width, int height) {
     if (width <= 0 || height <= 0) {
         return;
@@ -335,14 +360,7 @@ void display_resize(int width, int height) {
 
 void display_shutdown(void) {
     free_history();
-    if (decay_texture) {
-        SDL_DestroyTexture(decay_texture);
-        decay_texture = NULL;
-    }
-    if (renderer) {
-        SDL_DestroyRenderer(renderer);
-        renderer = NULL;
-    }
+    destroy_renderer_resources();
     if (window) {
         SDL_DestroyWindow(window);
         window = NULL;

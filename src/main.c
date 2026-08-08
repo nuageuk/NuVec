@@ -195,23 +195,18 @@ int main(int argc, char *argv[]) {
     // so it needs to start exactly where real hardware would.
     cpu_reset(&cpu);
 
-    // Real hardware runs the 6809 at ~1.5MHz and refreshes at ~50Hz. Pace
-    // execution to wall-clock time instead of a fixed instruction budget:
-    // each iteration, run however many 6809 cycles should have elapsed
-    // since the last one, then sleep off whatever's left of a 1/50s slice
-    // (measured, not a blind fixed delay -- so a slow iteration doesn't
-    // compound into drift).
-    const double CYCLES_PER_SEC = 1500000.0;
-    const double TARGET_HZ = 50.0;
-    const double TARGET_FRAME_SEC = 1.0 / TARGET_HZ;
-    // Caps the catch-up burst after a stall (window drag, OS scheduler
-    // hiccup) so it causes a visible pause instead of the CPU sprinting
-    // through several seconds' worth of instructions in one iteration.
-    const double MAX_CATCHUP_SEC = TARGET_FRAME_SEC * 4.0;
+    // Simulation advances in fixed 1/50-second steps while rendering is
+    // paced independently by vsync (or a 50 Hz delay when vsync is off).
+    const uint64_t CPU_CYCLES_PER_SEC = 1500000;
+    const uint64_t SIMULATION_HZ = 50;
+    const uint64_t CYCLES_PER_SIMULATION_STEP = CPU_CYCLES_PER_SEC / SIMULATION_HZ;
+    const double SIMULATION_STEP_SEC = 1.0 / (double)SIMULATION_HZ;
 
     const uint64_t perf_freq = SDL_GetPerformanceFrequency();
     uint64_t last_time = SDL_GetPerformanceCounter();
-    double pending_cycles = 0.0;
+    double simulation_accumulator = 0.0;
+    uint64_t simulation_cycle_target = cpu.cycles;
+    DisplayVsyncMode vsync_mode = VSYNC_ON;
 
     int halted = 0;
 
@@ -231,6 +226,9 @@ int main(int argc, char *argv[]) {
                 } else if (event.type == SDL_KEYDOWN && !event.key.repeat &&
                            event.key.keysym.sym == SDLK_F2) {
                     display_toggle_bloom();
+                } else if (event.type == SDL_KEYDOWN && !event.key.repeat &&
+                           event.key.keysym.sym == SDLK_F3) {
+                    vsync_mode = display_toggle_vsync();
                 } else {
                     input_handle_key(event.key.keysym.sym, event.type == SDL_KEYDOWN);
                 }
@@ -240,22 +238,18 @@ int main(int argc, char *argv[]) {
         uint64_t iter_start = SDL_GetPerformanceCounter();
         double elapsed_sec = (double)(iter_start - last_time) / (double)perf_freq;
         last_time = iter_start;
-        if (elapsed_sec > MAX_CATCHUP_SEC) {
-            elapsed_sec = MAX_CATCHUP_SEC;
+        simulation_accumulator += elapsed_sec;
+
+        while (simulation_accumulator >= SIMULATION_STEP_SEC) {
+            simulation_cycle_target += CYCLES_PER_SIMULATION_STEP;
+            simulation_accumulator -= SIMULATION_STEP_SEC;
         }
 
-        pending_cycles += elapsed_sec * CYCLES_PER_SEC;
-
-        // Free-run the real BIOS from wherever it currently is (HLE'd
-        // routines fire via cpu_try_hle()'s PC-match inside cpu_step()).
-        // Every real VIA write this makes flows through via_write8() into
-        // analog.c's per-cycle beam integrator, building up its current-
-        // frame vector list as it goes -- not rendered directly here.
+        // Pay all accumulated simulation debt before rendering. The target
+        // is cumulative so an instruction that crosses a step boundary is
+        // accounted for by the next step instead of causing clock drift.
         if (!halted) {
-            uint64_t cycles_to_run = (uint64_t)pending_cycles;
-            pending_cycles -= (double)cycles_to_run; // keep the fractional remainder, don't just drop it
-            uint64_t cycles_target = cpu.cycles + cycles_to_run;
-            while (cpu.cycles < cycles_target) {
+            while (cpu.cycles < simulation_cycle_target) {
                 if (!cpu_step(&cpu)) {
                     printf("CPU halted: unimplemented opcode at PC=0x%04X\n", cpu.PC);
                     halted = 1;
@@ -276,9 +270,11 @@ int main(int argc, char *argv[]) {
 
         uint64_t iter_end = SDL_GetPerformanceCounter();
         double iter_work_sec = (double)(iter_end - iter_start) / (double)perf_freq;
-        double remaining_sec = TARGET_FRAME_SEC - iter_work_sec;
-        if (remaining_sec > 0) {
-            SDL_Delay((Uint32)(remaining_sec * 1000.0));
+        if (vsync_mode == VSYNC_OFF) {
+            double remaining_sec = SIMULATION_STEP_SEC - iter_work_sec;
+            if (remaining_sec > 0) {
+                SDL_Delay((Uint32)(remaining_sec * 1000.0));
+            }
         }
     }
 

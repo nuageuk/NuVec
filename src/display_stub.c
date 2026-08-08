@@ -11,6 +11,7 @@
 static long line_count = 0;
 static int have_bounds = 0;
 static int min_x, max_x, min_y, max_y;
+static DisplayVsyncMode vsync_mode = VSYNC_ON;
 
 int display_init(void) { return 1; }
 void display_clear(void) {}
@@ -36,6 +37,10 @@ void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
 void display_present(void) {}
 void display_toggle_decay(void) {}
 void display_toggle_bloom(void) {}
+DisplayVsyncMode display_toggle_vsync(void) {
+    vsync_mode = vsync_mode == VSYNC_ON ? VSYNC_OFF : VSYNC_ON;
+    return vsync_mode;
+}
 void display_resize(int width, int height) { (void)width; (void)height; }
 void display_shutdown(void) {}
 
