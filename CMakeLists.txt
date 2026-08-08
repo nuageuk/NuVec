@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 find_package(SDL2 REQUIRED)
 
-add_executable(NuVec src/main.c src/memory.c src/cpu.c src/display.c src/via.c src/analog.c)
+add_executable(NuVec src/main.c src/memory.c src/cpu.c src/display.c src/via.c src/analog.c src/input.c)
 
 # SDL2main must come before SDL2 in the link line: on Windows, SDL.h #defines
 # main to SDL_main, and SDL2main's real entry point calls back into it.

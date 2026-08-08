@@ -4,10 +4,8 @@
 #include <stdint.h>
 
 // Interrupt Flag / Enable Register bits this emulation actually models.
-// The other IFR/IER bits (CA1, CA2, CB1) correspond to peripheral pins
-// (joystick/button input) that aren't emulated yet -- those bits just never
-// set, which is harmless: software polling them for now will simply never
-// see them fire.
+// The other IFR/IER bits (CA1, CA2, CB1) have no interrupt source modeled,
+// so those bits never set.
 #define VIA_IFR_SR 0x04
 #define VIA_IFR_T2 0x20
 #define VIA_IFR_T1 0x40

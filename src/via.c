@@ -1,6 +1,7 @@
 #include "via.h"
 #include "memory.h"
 #include "analog.h"
+#include "input.h"
 #include <string.h>
 
 // 6522 VIA register file, timers, and shift register, per
@@ -202,10 +203,25 @@ void via_tick(uint32_t cycles) {
 }
 
 // Port A read-back: output bits (DDRA=1) read the ORA latch; input bits
-// read as idle/released (1, active-low convention) since no live
-// controller is modeled.
+// read the active-low controller buttons.
 static uint8_t read_port_a(void) {
-    return (uint8_t)((via.ora & via.ddra) | (uint8_t)(~via.ddra));
+    uint8_t input_pins = (uint8_t)~input_get_state()->buttons;
+    return (uint8_t)((via.ora & via.ddra) | (input_pins & (uint8_t)~via.ddra));
+}
+
+static uint8_t read_joystick_comparator(void) {
+    const InputState *input = input_get_state();
+    int axis;
+
+    switch ((via.orb >> 1) & 0x03) {
+        case 0x00: axis = input->joystick_x; break;
+        case 0x01: axis = input->joystick_y; break;
+        default: axis = 0; break; // controller 2 is centered
+    }
+
+    int joystick_level = axis + 128;
+    int dac_level = via.ora ^ 0x80;
+    return joystick_level > dac_level ? 0x20 : 0x00;
 }
 
 uint8_t via_read8(uint16_t address) {
@@ -213,12 +229,13 @@ uint8_t via_read8(uint16_t address) {
 
     switch (reg) {
         case 0x0: // ORB -- bit 7 is a computed composite when Timer 1 has
-                  // control of it (ACR bit 7); bit 5 is the joystick
-                  // comparator, unmodeled, masked to 0.
+                  // control of it; bit 5 is the joystick comparator input.
             if (via.acr & 0x80) {
-                return (uint8_t)((via.orb & 0x5F) | (via.t1_pb7_high ? 0x80 : 0x00));
+                return (uint8_t)((via.orb & 0x5F) |
+                                 (via.t1_pb7_high ? 0x80 : 0x00) |
+                                 read_joystick_comparator());
             }
-            return (uint8_t)(via.orb & 0xDF);
+            return (uint8_t)((via.orb & 0xDF) | read_joystick_comparator());
         case 0x1: return read_port_a();
         case 0x2: return via.ddrb;
         case 0x3: return via.ddra;

@@ -3,6 +3,7 @@
 #include "cpu.h"
 #include "display.h"
 #include "analog.h"
+#include "input.h"
 #include <SDL.h>
 
 static void run_cpu_tests(Cpu *cpu) {
@@ -185,6 +186,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    input_reset();
+
     // Fresh reset before the render loop: run_cpu_tests() above reused this
     // Cpu instance as scratch space for unrelated register-level tests, so
     // PC/registers are left in whatever state those tests wanted, not the
@@ -218,6 +221,8 @@ int main(int argc, char *argv[]) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 running = 0;
+            } else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
+                input_handle_key(event.key.keysym.sym, event.type == SDL_KEYDOWN);
             }
         }
 
