@@ -186,6 +186,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    int display_hz = 144;
+    SDL_DisplayMode display_mode;
+    if (SDL_GetCurrentDisplayMode(0, &display_mode) == 0 &&
+        display_mode.refresh_rate > 0) {
+        display_hz = display_mode.refresh_rate;
+    }
+
     input_reset();
 
     // Fresh reset before the render loop: run_cpu_tests() above reused this
@@ -200,6 +207,8 @@ int main(int argc, char *argv[]) {
     const double CPU_CYCLES_PER_SEC = 1500000.0;
     const uint64_t CYCLE_BATCH_SIZE = 100;
     const double FALLBACK_FRAME_SEC = 1.0 / 50.0;
+    const double VSYNC_FRAME_SEC = 1.0 / (double)display_hz;
+    const double SPIN_THRESHOLD_SEC = 0.002;
 
     const uint64_t perf_freq = SDL_GetPerformanceFrequency();
     uint64_t last_time = SDL_GetPerformanceCounter();
@@ -275,7 +284,20 @@ int main(int argc, char *argv[]) {
 
         uint64_t iter_end = SDL_GetPerformanceCounter();
         double iter_work_sec = (double)(iter_end - iter_start) / (double)perf_freq;
-        if (vsync_mode == VSYNC_OFF) {
+        if (vsync_mode == VSYNC_ON) {
+            double remaining_sec = VSYNC_FRAME_SEC - iter_work_sec;
+            if (remaining_sec > SPIN_THRESHOLD_SEC) {
+                Uint32 delay_ms = (Uint32)(remaining_sec * 1000.0);
+                if (delay_ms > 1) {
+                    SDL_Delay(delay_ms - 1);
+                }
+            }
+
+            uint64_t frame_target = iter_start +
+                (uint64_t)(VSYNC_FRAME_SEC * (double)perf_freq);
+            while (SDL_GetPerformanceCounter() < frame_target) {
+            }
+        } else {
             double remaining_sec = FALLBACK_FRAME_SEC - iter_work_sec;
             Uint32 delay_ms = remaining_sec > 0.0
                             ? (Uint32)(remaining_sec * 1000.0 + 0.999)
