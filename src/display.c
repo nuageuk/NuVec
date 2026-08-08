@@ -6,6 +6,8 @@
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
 static SDL_Texture *decay_texture = NULL;
+static int logical_width = DISPLAY_WIDTH;
+static int logical_height = DISPLAY_HEIGHT;
 
 typedef struct {
     int x1, y1, x2, y2;
@@ -54,6 +56,10 @@ static int recreate_decay_texture(int width, int height) {
     }
     decay_texture = new_texture;
     return 1;
+}
+
+static int scale_coordinate(int value, int logical_size, int reference_size) {
+    return (int)((int64_t)value * logical_size / reference_size);
 }
 
 static void free_history(void) {
@@ -124,13 +130,17 @@ static void render_decay_history(void) {
             DisplayLine *line = &frame->lines[i];
             Uint8 brightness = (Uint8)((line->brightness * remaining) / DECAY_FRAMES);
             SDL_SetRenderDrawColor(renderer, brightness, brightness, brightness, 255);
-            SDL_RenderDrawLine(renderer, line->x1, line->y1, line->x2, line->y2);
+            SDL_RenderDrawLine(renderer,
+                               scale_coordinate(line->x1, logical_width, DISPLAY_WIDTH),
+                               scale_coordinate(line->y1, logical_height, DISPLAY_HEIGHT),
+                               scale_coordinate(line->x2, logical_width, DISPLAY_WIDTH),
+                               scale_coordinate(line->y2, logical_height, DISPLAY_HEIGHT));
         }
     }
 
     SDL_SetRenderTarget(renderer, NULL);
     clear_renderer();
-    SDL_Rect destination = { 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT };
+    SDL_Rect destination = { 0, 0, logical_width, logical_height };
     SDL_RenderCopy(renderer, decay_texture, NULL, &destination);
 }
 
@@ -202,7 +212,11 @@ void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
     }
 
     SDL_SetRenderDrawColor(renderer, brightness, brightness, brightness, 255);
-    SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+    SDL_RenderDrawLine(renderer,
+                       scale_coordinate(x1, logical_width, DISPLAY_WIDTH),
+                       scale_coordinate(y1, logical_height, DISPLAY_HEIGHT),
+                       scale_coordinate(x2, logical_width, DISPLAY_WIDTH),
+                       scale_coordinate(y2, logical_height, DISPLAY_HEIGHT));
 }
 
 void display_present(void) {
@@ -230,10 +244,14 @@ void display_resize(int width, int height) {
         return;
     }
 
-    SDL_RenderSetLogicalSize(renderer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-
     int render_width, render_height;
     fitted_render_size(width, height, &render_width, &render_height);
+    if (SDL_RenderSetLogicalSize(renderer, render_width, render_height) != 0) {
+        return;
+    }
+
+    logical_width = render_width;
+    logical_height = render_height;
     recreate_decay_texture(render_width, render_height);
 }
 
