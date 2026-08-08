@@ -6,8 +6,10 @@
 #define AY_CLOCK_RATE 93750
 #define AY_SAMPLE_RATE 44100
 #define AY_BUFFER_SAMPLES 512
+#define AY_NOISE_PERIOD_REGISTER 6
 #define AY_MIXER_REGISTER 7
 #define AY_AMPLITUDE_REGISTER 8
+#define AY_NOISE_LFSR_SEED 0x1FFFFu
 #define AY_VIA_MODE_INACTIVE 0x00
 #define AY_VIA_MODE_WRITE_DATA 0x02
 #define AY_VIA_MODE_LATCH_ADDRESS 0x03
@@ -17,6 +19,8 @@ static uint8_t selected_register;
 static SDL_AudioDeviceID audio_device;
 static uint16_t tone_counters[AY_CHANNEL_COUNT];
 static uint8_t tone_outputs[AY_CHANNEL_COUNT];
+static uint16_t noise_counter;
+static uint32_t noise_lfsr;
 static uint32_t tone_clock_accumulator;
 static uint8_t last_ora;
 static uint8_t previous_mode;
@@ -41,18 +45,36 @@ static void clock_tones(void) {
     }
 }
 
-static float mix_tones(void) {
+static uint8_t noise_period(void) {
+    uint8_t period = registers[AY_NOISE_PERIOD_REGISTER] & 0x1F;
+    return period ? period : 1;
+}
+
+static void clock_noise(void) {
+    if (noise_counter == 0) {
+        noise_counter = (uint16_t)noise_period() * 2;
+    }
+
+    noise_counter--;
+    if (noise_counter == 0) {
+        uint32_t feedback = (noise_lfsr ^ (noise_lfsr >> 3)) & 1u;
+        noise_lfsr = (noise_lfsr >> 1) | (feedback << 16);
+    }
+}
+
+static float mix_channels(void) {
     float mixed = 0.0f;
     uint8_t mixer = registers[AY_MIXER_REGISTER];
+    uint8_t noise_output = noise_lfsr & 1u;
 
     for (int channel = 0; channel < AY_CHANNEL_COUNT; channel++) {
-        if ((mixer & (1u << channel)) != 0) {
-            continue;
-        }
-
+        uint8_t tone_disabled = (mixer >> channel) & 1u;
+        uint8_t noise_disabled = (mixer >> (channel + 3)) & 1u;
+        uint8_t channel_output = (tone_outputs[channel] | tone_disabled) &
+                                 (noise_output | noise_disabled);
         float amplitude = (float)(registers[AY_AMPLITUDE_REGISTER + channel] & 0x0F) /
                           15.0f;
-        mixed += tone_outputs[channel] ? amplitude : -amplitude;
+        mixed += channel_output ? amplitude : -amplitude;
     }
 
     return mixed / (float)AY_CHANNEL_COUNT;
@@ -68,8 +90,9 @@ static void audio_callback(void *userdata, Uint8 *stream, int length) {
         while (tone_clock_accumulator >= AY_SAMPLE_RATE) {
             tone_clock_accumulator -= AY_SAMPLE_RATE;
             clock_tones();
+            clock_noise();
         }
-        samples[sample] = mix_tones();
+        samples[sample] = mix_channels();
     }
 }
 
@@ -78,6 +101,8 @@ int ay_init(void) {
 
     SDL_memset(tone_counters, 0, sizeof(tone_counters));
     SDL_memset(tone_outputs, 0, sizeof(tone_outputs));
+    noise_counter = 0;
+    noise_lfsr = AY_NOISE_LFSR_SEED;
     tone_clock_accumulator = 0;
     last_ora = 0;
     previous_mode = AY_VIA_MODE_INACTIVE;
