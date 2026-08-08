@@ -200,7 +200,6 @@ int main(int argc, char *argv[]) {
     const double CPU_CYCLES_PER_SEC = 1500000.0;
     const uint64_t CYCLE_BATCH_SIZE = 100;
     const double FALLBACK_FRAME_SEC = 1.0 / 50.0;
-    const double MAX_CATCHUP_CYCLES = CPU_CYCLES_PER_SEC * FALLBACK_FRAME_SEC * 4.0;
 
     const uint64_t perf_freq = SDL_GetPerformanceFrequency();
     uint64_t last_time = SDL_GetPerformanceCounter();
@@ -228,6 +227,10 @@ int main(int argc, char *argv[]) {
                 } else if (event.type == SDL_KEYDOWN && !event.key.repeat &&
                            event.key.keysym.sym == SDLK_F3) {
                     vsync_mode = display_toggle_vsync();
+                    if (vsync_mode == VSYNC_OFF) {
+                        last_time = SDL_GetPerformanceCounter();
+                        cycle_debt = 0.0;
+                    }
                 } else {
                     input_handle_key(event.key.keysym.sym, event.type == SDL_KEYDOWN);
                 }
@@ -237,10 +240,10 @@ int main(int argc, char *argv[]) {
         uint64_t iter_start = SDL_GetPerformanceCounter();
         double elapsed_sec = (double)(iter_start - last_time) / (double)perf_freq;
         last_time = iter_start;
-        cycle_debt += elapsed_sec * CPU_CYCLES_PER_SEC;
-        if (cycle_debt > MAX_CATCHUP_CYCLES) {
-            cycle_debt = MAX_CATCHUP_CYCLES;
+        if (elapsed_sec > FALLBACK_FRAME_SEC) {
+            elapsed_sec = FALLBACK_FRAME_SEC;
         }
+        cycle_debt += elapsed_sec * CPU_CYCLES_PER_SEC;
 
         // Pay the cycle debt in small batches. Instruction-boundary
         // overshoot remains as negative debt and is absorbed next time.
