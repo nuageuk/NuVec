@@ -4,6 +4,7 @@
 #include "display.h"
 #include "analog.h"
 #include "input.h"
+#include "ay.h"
 #include <SDL.h>
 
 static void run_cpu_tests(Cpu *cpu) {
@@ -185,6 +186,11 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Failed to initialize display\n");
         return 1;
     }
+    if (!ay_init()) {
+        fprintf(stderr, "Failed to initialize AY audio: %s\n", SDL_GetError());
+        display_shutdown();
+        return 1;
+    }
 
     int display_hz = 144;
     SDL_DisplayMode display_mode;
@@ -306,6 +312,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    ay_shutdown();
     display_shutdown();
 
     return 0;
