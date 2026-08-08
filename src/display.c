@@ -29,6 +29,8 @@ static DisplayDecayMode decay_mode = DECAY_ON;
 static DisplayBloomMode bloom_mode = BLOOM_ON;
 static DisplayVsyncMode vsync_mode = VSYNC_ON;
 
+static void free_history(void);
+
 static void clear_renderer(void) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -89,7 +91,10 @@ static int create_renderer(DisplayVsyncMode mode) {
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     if (SDL_RenderSetLogicalSize(renderer, logical_width, logical_height) != 0 ||
         !recreate_decay_texture(logical_width, logical_height)) {
-        destroy_renderer_resources();
+        if (decay_texture) {
+            SDL_DestroyTexture(decay_texture);
+            decay_texture = NULL;
+        }
         return 0;
     }
 
@@ -98,6 +103,7 @@ static int create_renderer(DisplayVsyncMode mode) {
 
 static int recreate_renderer(DisplayVsyncMode mode) {
     destroy_renderer_resources();
+    free_history();
     return create_renderer(mode);
 }
 
