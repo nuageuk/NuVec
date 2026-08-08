@@ -276,9 +276,10 @@ int main(int argc, char *argv[]) {
         double iter_work_sec = (double)(iter_end - iter_start) / (double)perf_freq;
         if (vsync_mode == VSYNC_OFF) {
             double remaining_sec = FALLBACK_FRAME_SEC - iter_work_sec;
-            if (remaining_sec > 0) {
-                SDL_Delay((Uint32)(remaining_sec * 1000.0));
-            }
+            Uint32 delay_ms = remaining_sec > 0.0
+                            ? (Uint32)(remaining_sec * 1000.0 + 0.999)
+                            : 1;
+            SDL_Delay(delay_ms);
         }
     }
 
