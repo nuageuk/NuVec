@@ -275,7 +275,9 @@ int main(int argc, char *argv[]) {
                     break;
                 }
             }
-            cycle_debt -= (double)(cpu.cycles - batch_start);
+            uint64_t executed_cycles = cpu.cycles - batch_start;
+            ay_update(executed_cycles);
+            cycle_debt -= (double)executed_cycles;
         }
 
         // Render the current-frame vector list plus the completed previous

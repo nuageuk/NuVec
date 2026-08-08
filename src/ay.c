@@ -4,8 +4,10 @@
 #define AY_REGISTER_COUNT 16
 #define AY_CHANNEL_COUNT 3
 #define AY_CLOCK_RATE 93750
+#define AY_CPU_CYCLES_PER_TICK 16
 #define AY_SAMPLE_RATE 44100
 #define AY_BUFFER_SAMPLES 512
+#define AY_SAMPLE_RING_SIZE 4096
 #define AY_NOISE_PERIOD_REGISTER 6
 #define AY_MIXER_REGISTER 7
 #define AY_AMPLITUDE_REGISTER 8
@@ -28,7 +30,12 @@ static uint16_t envelope_counter;
 static uint8_t envelope_position;
 static int8_t envelope_direction;
 static uint8_t envelope_holding;
-static uint32_t tone_clock_accumulator;
+static float sample_ring[AY_SAMPLE_RING_SIZE];
+static size_t sample_read_index;
+static size_t sample_write_index;
+static size_t queued_samples;
+static uint8_t cpu_cycle_remainder;
+static uint32_t sample_clock_accumulator;
 static uint8_t last_ora;
 static uint8_t previous_mode;
 
@@ -166,20 +173,30 @@ static float mix_channels(void) {
     return mixed / (float)AY_CHANNEL_COUNT;
 }
 
+static void queue_sample(float sample) {
+    if (queued_samples == AY_SAMPLE_RING_SIZE) {
+        sample_read_index = (sample_read_index + 1) % AY_SAMPLE_RING_SIZE;
+        queued_samples--;
+    }
+
+    sample_ring[sample_write_index] = sample;
+    sample_write_index = (sample_write_index + 1) % AY_SAMPLE_RING_SIZE;
+    queued_samples++;
+}
+
 static void audio_callback(void *userdata, Uint8 *stream, int length) {
     (void)userdata;
 
     float *samples = (float *)stream;
-    int sample_count = length / (int)sizeof(*samples);
-    for (int sample = 0; sample < sample_count; sample++) {
-        tone_clock_accumulator += AY_CLOCK_RATE;
-        while (tone_clock_accumulator >= AY_SAMPLE_RATE) {
-            tone_clock_accumulator -= AY_SAMPLE_RATE;
-            clock_tones();
-            clock_noise();
-            clock_envelope();
+    int output_count = length / (int)sizeof(*samples);
+    for (int sample = 0; sample < output_count; sample++) {
+        if (queued_samples > 0) {
+            samples[sample] = sample_ring[sample_read_index];
+            sample_read_index = (sample_read_index + 1) % AY_SAMPLE_RING_SIZE;
+            queued_samples--;
+        } else {
+            samples[sample] = 0.0f;
         }
-        samples[sample] = mix_channels();
     }
 }
 
@@ -194,7 +211,11 @@ int ay_init(void) {
     envelope_position = 0;
     envelope_direction = -1;
     envelope_holding = 1;
-    tone_clock_accumulator = 0;
+    sample_read_index = 0;
+    sample_write_index = 0;
+    queued_samples = 0;
+    cpu_cycle_remainder = 0;
+    sample_clock_accumulator = 0;
     last_ora = 0;
     previous_mode = AY_VIA_MODE_INACTIVE;
 
@@ -224,6 +245,32 @@ void ay_shutdown(void) {
         audio_device = 0;
     }
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
+}
+
+void ay_update(uint64_t cpu_cycles) {
+    uint64_t total_cycles = cpu_cycles + cpu_cycle_remainder;
+    uint64_t ay_ticks = total_cycles / AY_CPU_CYCLES_PER_TICK;
+    cpu_cycle_remainder = (uint8_t)(total_cycles % AY_CPU_CYCLES_PER_TICK);
+
+    if (audio_device) {
+        SDL_LockAudioDevice(audio_device);
+    }
+
+    for (uint64_t tick = 0; tick < ay_ticks; tick++) {
+        clock_tones();
+        clock_noise();
+        clock_envelope();
+
+        sample_clock_accumulator += AY_SAMPLE_RATE;
+        while (sample_clock_accumulator >= AY_CLOCK_RATE) {
+            sample_clock_accumulator -= AY_CLOCK_RATE;
+            queue_sample(mix_channels());
+        }
+    }
+
+    if (audio_device) {
+        SDL_UnlockAudioDevice(audio_device);
+    }
 }
 
 void ay_write_addr(uint8_t address) {
