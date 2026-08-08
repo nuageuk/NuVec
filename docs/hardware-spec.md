@@ -161,7 +161,8 @@ stable on a CRT with phosphor persistence, not because any register enforces
 it. The emulator needs its own periodic checkpoint (paced by an approximate
 CPU-cycles-per-redraw figure derived from the 6809's clock rate and a chosen
 target refresh rate) at which it hands the segments accumulated since the
-last checkpoint to the display, and — so the screen doesn't flash to black
-while a game is mid-way through redrawing its next set of lines — the
-previous checkpoint's segments should keep being shown, dimmer, until the
-next one replaces them.
+last checkpoint to the display. So the screen doesn't flash to black while
+a game is mid-way through redrawing its next set of lines, the previous
+checkpoint's segments remain part of the submitted display list until the
+next checkpoint replaces them. Phosphor persistence is then applied by the
+display layer to complete submitted host frames.

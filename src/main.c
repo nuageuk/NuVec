@@ -222,7 +222,12 @@ int main(int argc, char *argv[]) {
             if (event.type == SDL_QUIT) {
                 running = 0;
             } else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
-                input_handle_key(event.key.keysym.sym, event.type == SDL_KEYDOWN);
+                if (event.type == SDL_KEYDOWN && !event.key.repeat &&
+                    event.key.keysym.sym == SDLK_F1) {
+                    display_toggle_decay();
+                } else {
+                    input_handle_key(event.key.keysym.sym, event.type == SDL_KEYDOWN);
+                }
             }
         }
 
@@ -253,8 +258,8 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Render the current-frame vector list plus the still-fading
-        // previous one (analog_render(), see analog.c) every host frame,
+        // Render the current-frame vector list plus the completed previous
+        // checkpoint (analog_render(), see analog.c) every host frame,
         // regardless of whether analog.c's own ~1/30s-of-cycles frame timer
         // has swapped since the last SDL frame -- this is what keeps the
         // screen showing the last real frame instead of going black

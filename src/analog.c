@@ -229,7 +229,7 @@ static void analog_to_screen(int32_t ax, int32_t ay, int *sx, int *sy) {
     *sy = (int)(offset_y + ay / scale);
 }
 
-static void render_segments(const Segment *list, int count, int dim) {
+static void render_segments(const Segment *list, int count) {
     for (int i = 0; i < count; i++) {
         int x0, y0, x1, y1;
         analog_to_screen(list[i].x0, list[i].y0, &x0, &y0);
@@ -237,13 +237,6 @@ static void render_segments(const Segment *list, int count, int dim) {
 
         // 0-127 Z-channel range -> 0-255 display brightness.
         int brightness = list[i].z * 256 / ANALOG_COLORS;
-        if (dim) {
-            // The prior checkpoint's segments render dimmer, both as a
-            // crude phosphor-persistence approximation and, concretely, so
-            // the screen never goes solid black just because the CPU
-            // hasn't produced a new segment since the last checkpoint.
-            brightness /= 2;
-        }
         if (brightness > 255) {
             brightness = 255;
         }
@@ -253,6 +246,6 @@ static void render_segments(const Segment *list, int count, int dim) {
 }
 
 void analog_render(void) {
-    render_segments(frame.previous, frame.previous_count, 1);
-    render_segments(frame.current, frame.current_count, 0);
+    render_segments(frame.previous, frame.previous_count);
+    render_segments(frame.current, frame.current_count);
 }

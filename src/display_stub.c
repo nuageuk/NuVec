@@ -34,6 +34,7 @@ void display_draw_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
 }
 
 void display_present(void) {}
+void display_toggle_decay(void) {}
 void display_shutdown(void) {}
 
 long display_stub_line_count(void) { return line_count; }
