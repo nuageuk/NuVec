@@ -9,6 +9,9 @@
 #define AY_NOISE_PERIOD_REGISTER 6
 #define AY_MIXER_REGISTER 7
 #define AY_AMPLITUDE_REGISTER 8
+#define AY_ENVELOPE_PERIOD_LOW_REGISTER 11
+#define AY_ENVELOPE_PERIOD_HIGH_REGISTER 12
+#define AY_ENVELOPE_SHAPE_REGISTER 13
 #define AY_NOISE_LFSR_SEED 0x1FFFFu
 #define AY_VIA_MODE_INACTIVE 0x00
 #define AY_VIA_MODE_WRITE_DATA 0x02
@@ -21,6 +24,10 @@ static uint16_t tone_counters[AY_CHANNEL_COUNT];
 static uint8_t tone_outputs[AY_CHANNEL_COUNT];
 static uint16_t noise_counter;
 static uint32_t noise_lfsr;
+static uint16_t envelope_counter;
+static uint8_t envelope_position;
+static int8_t envelope_direction;
+static uint8_t envelope_holding;
 static uint32_t tone_clock_accumulator;
 static uint8_t last_ora;
 static uint8_t previous_mode;
@@ -62,6 +69,82 @@ static void clock_noise(void) {
     }
 }
 
+static uint16_t envelope_period(void) {
+    uint16_t period = registers[AY_ENVELOPE_PERIOD_LOW_REGISTER] |
+                      ((uint16_t)registers[AY_ENVELOPE_PERIOD_HIGH_REGISTER] << 8);
+    return period ? period : 1;
+}
+
+static void restart_envelope(void) {
+    uint8_t shape = registers[AY_ENVELOPE_SHAPE_REGISTER] & 0x0F;
+
+    envelope_holding = 0;
+    envelope_counter = envelope_period();
+    if (shape < 0x08 || (shape & 0x04) == 0) {
+        envelope_position = 15;
+        envelope_direction = -1;
+    } else {
+        envelope_position = 0;
+        envelope_direction = 1;
+    }
+}
+
+static void step_envelope(void) {
+    uint8_t shape = registers[AY_ENVELOPE_SHAPE_REGISTER] & 0x0F;
+
+    if (envelope_holding) {
+        return;
+    }
+    if (envelope_direction > 0 && envelope_position < 15) {
+        envelope_position++;
+        return;
+    }
+    if (envelope_direction < 0 && envelope_position > 0) {
+        envelope_position--;
+        return;
+    }
+
+    switch (shape) {
+        case 0x08:
+            envelope_position = 15;
+            break;
+        case 0x0A:
+        case 0x0E:
+            envelope_direction = (int8_t)-envelope_direction;
+            break;
+        case 0x0B:
+        case 0x0D:
+            envelope_position = 15;
+            envelope_holding = 1;
+            break;
+        case 0x0C:
+            envelope_position = 0;
+            break;
+        case 0x0F:
+            envelope_position = 0;
+            envelope_holding = 1;
+            break;
+        default:
+            envelope_position = 0;
+            envelope_holding = 1;
+            break;
+    }
+}
+
+static void clock_envelope(void) {
+    if (envelope_holding) {
+        return;
+    }
+    if (envelope_counter == 0) {
+        envelope_counter = envelope_period();
+    }
+
+    envelope_counter--;
+    if (envelope_counter == 0) {
+        step_envelope();
+    }
+}
+
 static float mix_channels(void) {
     float mixed = 0.0f;
     uint8_t mixer = registers[AY_MIXER_REGISTER];
@@ -72,8 +155,11 @@ static float mix_channels(void) {
         uint8_t noise_disabled = (mixer >> (channel + 3)) & 1u;
         uint8_t channel_output = (tone_outputs[channel] | tone_disabled) &
                                  (noise_output | noise_disabled);
-        float amplitude = (float)(registers[AY_AMPLITUDE_REGISTER + channel] & 0x0F) /
-                          15.0f;
+        uint8_t amplitude_register = registers[AY_AMPLITUDE_REGISTER + channel];
+        uint8_t amplitude_level = (amplitude_register & 0x10)
+                                    ? envelope_position
+                                    : (amplitude_register & 0x0F);
+        float amplitude = (float)amplitude_level / 15.0f;
         mixed += channel_output ? amplitude : -amplitude;
     }
 
@@ -91,6 +177,7 @@ static void audio_callback(void *userdata, Uint8 *stream, int length) {
             tone_clock_accumulator -= AY_SAMPLE_RATE;
             clock_tones();
             clock_noise();
+            clock_envelope();
         }
         samples[sample] = mix_channels();
     }
@@ -103,6 +190,10 @@ int ay_init(void) {
     SDL_memset(tone_outputs, 0, sizeof(tone_outputs));
     noise_counter = 0;
     noise_lfsr = AY_NOISE_LFSR_SEED;
+    envelope_counter = 0;
+    envelope_position = 0;
+    envelope_direction = -1;
+    envelope_holding = 1;
     tone_clock_accumulator = 0;
     last_ora = 0;
     previous_mode = AY_VIA_MODE_INACTIVE;
@@ -155,6 +246,9 @@ void ay_write_data(uint8_t value) {
     }
     register_index = selected_register;
     registers[register_index] = value;
+    if (register_index == AY_ENVELOPE_SHAPE_REGISTER) {
+        restart_envelope();
+    }
     if (audio_device) {
         SDL_UnlockAudioDevice(audio_device);
     }
