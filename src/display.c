@@ -29,6 +29,65 @@ static DisplayDecayMode decay_mode = DECAY_ON;
 static DisplayBloomMode bloom_mode = BLOOM_ON;
 static DisplayVsyncMode vsync_mode = VSYNC_ON;
 
+enum {
+    OSD_FONT_WIDTH = 5,
+    OSD_FONT_HEIGHT = 7,
+    OSD_FONT_SCALE = 2,
+    OSD_GLYPH_ADVANCE = 6,
+    OSD_MARGIN = 8,
+    OSD_NOTIFICATION_HOLD_MS = 1500,
+    OSD_NOTIFICATION_FADE_MS = 500,
+    OSD_NOTIFICATION_TOTAL_MS = OSD_NOTIFICATION_HOLD_MS + OSD_NOTIFICATION_FADE_MS
+};
+
+static const uint8_t digit_glyphs[10][OSD_FONT_HEIGHT] = {
+    { 0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E },
+    { 0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E },
+    { 0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F },
+    { 0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E },
+    { 0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02 },
+    { 0x1F, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x1E },
+    { 0x0E, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x0E },
+    { 0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08 },
+    { 0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E },
+    { 0x0E, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x0E }
+};
+
+static const uint8_t letter_glyphs[26][OSD_FONT_HEIGHT] = {
+    { 0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11 },
+    { 0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E },
+    { 0x0F, 0x10, 0x10, 0x10, 0x10, 0x10, 0x0F },
+    { 0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E },
+    { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F },
+    { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10 },
+    { 0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0E },
+    { 0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11 },
+    { 0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E },
+    { 0x07, 0x02, 0x02, 0x02, 0x12, 0x12, 0x0C },
+    { 0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11 },
+    { 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F },
+    { 0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11 },
+    { 0x11, 0x19, 0x19, 0x15, 0x13, 0x13, 0x11 },
+    { 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E },
+    { 0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10 },
+    { 0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D },
+    { 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11 },
+    { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E },
+    { 0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04 },
+    { 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E },
+    { 0x11, 0x11, 0x11, 0x11, 0x0A, 0x0A, 0x04 },
+    { 0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11 },
+    { 0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11 },
+    { 0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04 },
+    { 0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F }
+};
+
+static const char *osd_notification = NULL;
+static Uint32 osd_notification_started = 0;
+static Uint32 fps_window_started = 0;
+static unsigned fps_frame_count = 0;
+static unsigned fps_value = 0;
+
 static void free_history(void);
 
 static void clear_renderer(void) {
@@ -131,6 +190,103 @@ static void render_line(int x1, int y1, int x2, int y2, uint8_t brightness,
 
     SDL_SetRenderDrawColor(renderer, brightness, brightness, brightness, 255);
     SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+}
+
+static const uint8_t *osd_glyph(char character) {
+    static const uint8_t blank[OSD_FONT_HEIGHT] = { 0 };
+    static const uint8_t colon[OSD_FONT_HEIGHT] =
+        { 0x00, 0x04, 0x04, 0x00, 0x04, 0x04, 0x00 };
+    static const uint8_t slash[OSD_FONT_HEIGHT] =
+        { 0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10 };
+    static const uint8_t period[OSD_FONT_HEIGHT] =
+        { 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x04 };
+
+    if (character >= '0' && character <= '9') {
+        return digit_glyphs[character - '0'];
+    }
+    if (character >= 'A' && character <= 'Z') {
+        return letter_glyphs[character - 'A'];
+    }
+    switch (character) {
+        case ':': return colon;
+        case '/': return slash;
+        case '.': return period;
+        default: return blank;
+    }
+}
+
+static int osd_text_width(const char *text) {
+    int characters = 0;
+    while (*text++) {
+        characters++;
+    }
+    return characters ? (characters * OSD_GLYPH_ADVANCE - 1) * OSD_FONT_SCALE : 0;
+}
+
+static void draw_osd_text(int x, int y, const char *text, Uint8 alpha) {
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, alpha);
+
+    while (*text) {
+        const uint8_t *glyph = osd_glyph(*text++);
+        for (int row = 0; row < OSD_FONT_HEIGHT; row++) {
+            for (int column = 0; column < OSD_FONT_WIDTH; column++) {
+                if ((glyph[row] & (1u << (OSD_FONT_WIDTH - 1 - column))) == 0) {
+                    continue;
+                }
+                for (int py = 0; py < OSD_FONT_SCALE; py++) {
+                    for (int px = 0; px < OSD_FONT_SCALE; px++) {
+                        SDL_RenderDrawPoint(renderer,
+                                            x + column * OSD_FONT_SCALE + px,
+                                            y + row * OSD_FONT_SCALE + py);
+                    }
+                }
+            }
+        }
+        x += OSD_GLYPH_ADVANCE * OSD_FONT_SCALE;
+    }
+}
+
+static void show_osd_notification(const char *message) {
+    osd_notification = message;
+    osd_notification_started = SDL_GetTicks();
+}
+
+static void render_osd(Uint32 now) {
+    char fps_text[16];
+    snprintf(fps_text, sizeof(fps_text), "FPS: %u", fps_value);
+    draw_osd_text(OSD_MARGIN, OSD_MARGIN, fps_text, 255);
+
+    if (!osd_notification) {
+        return;
+    }
+
+    Uint32 age = now - osd_notification_started;
+    if (age >= OSD_NOTIFICATION_TOTAL_MS) {
+        osd_notification = NULL;
+        return;
+    }
+
+    Uint8 alpha = 255;
+    if (age > OSD_NOTIFICATION_HOLD_MS) {
+        alpha = (Uint8)(255u * (OSD_NOTIFICATION_TOTAL_MS - age) /
+                        OSD_NOTIFICATION_FADE_MS);
+    }
+
+    int x = logical_width - OSD_MARGIN - osd_text_width(osd_notification);
+    if (x < OSD_MARGIN) {
+        x = OSD_MARGIN;
+    }
+    draw_osd_text(x, OSD_MARGIN, osd_notification, alpha);
+}
+
+static void update_fps(Uint32 now) {
+    fps_frame_count++;
+    Uint32 elapsed = now - fps_window_started;
+    if (elapsed >= 1000) {
+        fps_value = (unsigned)((fps_frame_count * 1000u + elapsed / 2u) / elapsed);
+        fps_frame_count = 0;
+        fps_window_started = now;
+    }
 }
 
 static void free_history(void) {
@@ -288,6 +444,11 @@ int display_init(void) {
         return 0;
     }
 
+    fps_window_started = SDL_GetTicks();
+    fps_frame_count = 0;
+    fps_value = 0;
+    osd_notification = NULL;
+
     return 1;
 }
 
@@ -324,7 +485,9 @@ void display_present(void) {
         frame_counter++;
         purge_expired_history();
     }
+    render_osd(SDL_GetTicks());
     SDL_RenderPresent(renderer);
+    update_fps(SDL_GetTicks());
 }
 
 void display_toggle_decay(void) {
@@ -335,10 +498,12 @@ void display_toggle_decay(void) {
         decay_mode = DECAY_ON;
         frame_counter = 0;
     }
+    show_osd_notification(decay_mode == DECAY_ON ? "DECAY ON" : "DECAY OFF");
 }
 
 void display_toggle_bloom(void) {
     bloom_mode = bloom_mode == BLOOM_ON ? BLOOM_OFF : BLOOM_ON;
+    show_osd_notification(bloom_mode == BLOOM_ON ? "BLOOM ON" : "BLOOM OFF");
 }
 
 DisplayVsyncMode display_toggle_vsync(void) {
@@ -348,6 +513,7 @@ DisplayVsyncMode display_toggle_vsync(void) {
     } else {
         recreate_renderer(vsync_mode);
     }
+    show_osd_notification(vsync_mode == VSYNC_ON ? "VSYNC ON" : "VSYNC OFF");
     return vsync_mode;
 }
 
