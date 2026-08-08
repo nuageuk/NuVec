@@ -40,6 +40,16 @@ static void free_history(void) {
     capture_frame = NULL;
 }
 
+static void purge_expired_history(void) {
+    if (frame_counter < DECAY_FRAMES) {
+        return;
+    }
+
+    HistoryFrame *expired = &history[(frame_counter - DECAY_FRAMES) % DECAY_FRAMES];
+    expired->count = 0;
+    expired->timestamp = 0;
+}
+
 static void capture_line(int x1, int y1, int x2, int y2, uint8_t brightness) {
     if (!capture_frame) {
         return;
@@ -166,6 +176,7 @@ void display_present(void) {
         render_decay_history();
         capture_frame = NULL;
         frame_counter++;
+        purge_expired_history();
     }
     SDL_RenderPresent(renderer);
 }

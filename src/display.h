@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define DECAY_FRAMES 12
+#define DECAY_FRAMES 4
 
 typedef enum {
     DECAY_OFF,
